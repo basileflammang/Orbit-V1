@@ -71,7 +71,10 @@
     padding:10px 20px calc(var(--safe-b) + 22px);max-height:90vh;overflow-y:auto;
     transform:translateY(110%);transition:transform .38s cubic-bezier(.22,1,.36,1);-webkit-overflow-scrolling:touch;}
   .sheet.on{transform:translateY(0);}
-  .grab{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,0.22);margin:2px auto 14px;}
+  .sheet-top{position:sticky;top:0;z-index:5;background:var(--panel);margin:0 -20px 6px;padding:10px 20px 8px;display:flex;align-items:center;justify-content:center;}
+  .sheet-x{position:absolute;right:16px;top:8px;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  .sheet-x:active{transform:scale(0.9);}
+  .grab{width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,0.25);}
   .sh-title{font-size:23px;font-weight:800;letter-spacing:-0.02em;}
   .sh-sub{font-size:13px;color:var(--txt2);margin-top:3px;}
   .row{display:flex;align-items:center;gap:10px;}
@@ -109,6 +112,7 @@
 
   .meter{display:flex;gap:4px;margin-top:8px;}
   .meter i{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,0.08);}
+  .photoPrev{width:54px;height:54px;border-radius:50%;flex-shrink:0;background:#2C2C2E center/cover no-repeat;border:0.5px solid var(--line2);cursor:pointer;}
 
   .link-row{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.05);border:0.5px solid var(--line);
     border-radius:12px;padding:12px 13px;margin-bottom:8px;text-decoration:none;color:#fff;font-size:14px;}
@@ -264,6 +268,7 @@ const CAT = {
   colleague:{c:"#0A84FF",label:"Colleague"},
 };
 const PLACE_C = "#BF5AF2";
+const EVENT_C = "#40C8E0";
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const DAY = 86400000;
@@ -277,8 +282,10 @@ function shade(hex, amt){
 function nodeColor(n){
   if(n.type==="me") return "#FFFFFF";
   if(n.type==="place") return PLACE_C;
+  if(n.type==="event") return EVENT_C;
   return (CAT[n.category]||CAT.friend).c;
 }
+function isContainerType(t){ return t==="place"||t==="event"; }
 function allNodes(){ return [ME, ...state.nodes]; }
 function byId(id){ if(id==="me")return ME; return state.nodes.find(n=>n.id===id)||null; }
 
@@ -297,7 +304,7 @@ function radiusOf(n){
   if(n.type==="me") return 46;
   const d = n._desc||0;
   const descBonus = Math.sqrt(d)*8;
-  if(n.type==="place") return clamp(30 + descBonus*1.15, 32, 155);
+  if(isContainerType(n.type)) return clamp(30 + descBonus*1.15, 32, 155);
   // strong, adaptive gradient by closeness (1..10) plus who branches off them
   const imp = clamp(n.closeness||5, 1, 10);
   const core = 14 + Math.pow(imp/10, 1.25) * 46;   // ~16 (distant) -> ~60 (inner circle)
@@ -476,18 +483,25 @@ function drawNode(n){
   const sx=toScreenX(n.x), sy=toScreenY(n.y), r=n._r*cam.scale;
   if(sx< -r-60||sx>W+r+60||sy<-r-60||sy>H+r+60) return; // cull
   const col = nodeColor(n);
-  const isMe = n.type==="me", isPlace=n.type==="place";
+  const isMe = n.type==="me", isContainer = isContainerType(n.type);
+  const im = getImg(n);
 
-  // glow
+  // glow + body (photo fills the bubble if present)
   ctx.shadowColor = hexA(col, 0.5); ctx.shadowBlur = Math.min(30, r*0.7);
-  // body
-  const grad=ctx.createRadialGradient(sx-r*0.3,sy-r*0.35,r*0.1, sx,sy,r);
-  grad.addColorStop(0, isMe?"#ffffff":col);
-  grad.addColorStop(1, isMe?"#c7c7cc":shade(col,-0.34));
-  ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill();
-  ctx.shadowBlur=0;
+  ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
+  if(im){
+    ctx.fillStyle=shade(col,-0.2); ctx.fill(); ctx.shadowBlur=0;
+    ctx.save(); ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.clip();
+    ctx.drawImage(im, sx-r, sy-r, r*2, r*2); ctx.restore();
+  } else {
+    const grad=ctx.createRadialGradient(sx-r*0.3,sy-r*0.35,r*0.1, sx,sy,r);
+    grad.addColorStop(0, isMe?"#ffffff":col);
+    grad.addColorStop(1, isMe?"#c7c7cc":shade(col,-0.34));
+    ctx.fillStyle=grad; ctx.fill(); ctx.shadowBlur=0;
+  }
   // rim
-  ctx.lineWidth=Math.max(0.5,0.8*cam.scale); ctx.strokeStyle="rgba(255,255,255,0.25)"; ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
+  ctx.lineWidth=Math.max(0.5,(im?1.6:0.8)*cam.scale); ctx.strokeStyle=im?hexA(col,0.95):"rgba(255,255,255,0.25)"; ctx.stroke();
 
   // contact status ring (people)
   if(n.type==="person"){
@@ -516,13 +530,13 @@ function drawNode(n){
     ctx.beginPath(); ctx.arc(sx,sy,r+9+focusPulse*10,0,Math.PI*2); ctx.stroke();
   }
 
-  // icon / initials inside big enough bubbles
-  if(r>14){
+  // icon / initials inside big enough bubbles (skipped when a photo fills the bubble)
+  if(r>14 && !im){
     ctx.fillStyle= isMe? "#000" : "rgba(255,255,255,0.95)";
     ctx.textAlign="center"; ctx.textBaseline="middle";
-    if(isPlace){
+    if(isContainer){
       ctx.font=`${Math.round(r*0.9)}px ${FS}`;
-      ctx.fillText(n.emoji||"📍", sx, sy+r*0.04);
+      ctx.fillText(n.emoji||(n.type==="event"?"🎉":"📍"), sx, sy+r*0.04);
     }else if(isMe){
       ctx.font=`700 ${Math.round(r*0.5)}px ${FS}`;
       ctx.fillText(initials(n.name), sx, sy);
@@ -533,15 +547,45 @@ function drawNode(n){
   }
   // label (LOD: only when the bubble is reasonably large on screen)
   const screenR=r;
-  if(screenR>13 || isPlace || isMe){
-    const label = isPlace? n.name : firstName(n.name);
-    ctx.font=`${isPlace?"700":"600"} ${clamp(Math.round(11*Math.min(cam.scale,1.3)),10,15)}px ${FS}`;
+  if(screenR>13 || isContainer || isMe){
+    const label = isContainer? n.name : firstName(n.name);
+    ctx.font=`${isContainer?"700":"600"} ${clamp(Math.round(11*Math.min(cam.scale,1.3)),10,15)}px ${FS}`;
     ctx.textAlign="center"; ctx.textBaseline="top";
-    ctx.fillStyle= isPlace? "#E7D3FA" : "rgba(255,255,255,0.92)";
+    ctx.fillStyle= n.type==="place"?"#E7D3FA": n.type==="event"?"#C7EEFA":"rgba(255,255,255,0.92)";
     ctx.shadowColor="rgba(0,0,0,0.85)"; ctx.shadowBlur=5;
     ctx.fillText(label, sx, sy+r+5);
     ctx.shadowBlur=0;
   }
+}
+const imgCache={};
+function getImg(n){
+  if(!n||!n.photo) return null;
+  let im=imgCache[n.id];
+  if(!im || im.__src!==n.photo){ im=new Image(); im.__src=n.photo; im.onload=()=>requestFrame(); im.src=n.photo; imgCache[n.id]=im; }
+  return (im.complete && im.naturalWidth>0)? im : null;
+}
+function processImage(file, cb){
+  if(!file){ cb(null); return; }
+  const rd=new FileReader();
+  rd.onload=()=>{ const img=new Image();
+    img.onload=()=>{ const S=224; const c=document.createElement("canvas"); c.width=S; c.height=S;
+      const g=c.getContext("2d"); const side=Math.min(img.width,img.height);
+      const sx=(img.width-side)/2, sy=(img.height-side)/2;
+      g.drawImage(img,sx,sy,side,side,0,0,S,S);
+      try{ cb(c.toDataURL("image/jpeg",0.72)); }catch(e){ cb(null); } };
+    img.onerror=()=>cb(null); img.src=rd.result; };
+  rd.onerror=()=>cb(null);
+  rd.readAsDataURL(file);
+}
+function wirePhoto(get,set){
+  const pf=document.getElementById("photoFile"), pb=document.getElementById("photoBtn"), pv=document.getElementById("photoPrev");
+  if(!pf||!pb||!pv) return;
+  pb.onclick=()=>pf.click();
+  pf.onchange=e=>processImage(e.target.files&&e.target.files[0], durl=>{
+    if(!durl){ toast("Couldn't read that image"); return; }
+    set(durl); pv.style.backgroundImage="url('"+durl+"')"; pb.textContent="Change photo"; haptic();
+  });
+  pv.onclick=()=>{ if(get()){ set(""); pv.style.backgroundImage=""; pb.textContent="Choose photo"; toast("Photo removed"); } };
 }
 function initials(name){ const p=(name||"").trim().split(/\s+/); return ((p[0]?.[0]||"")+(p[1]?.[0]||"")).toUpperCase()||"?"; }
 function firstName(name){ return (name||"").trim().split(/\s+/)[0]||""; }
@@ -561,6 +605,7 @@ function nodeAt(sx,sy){
 
 let ptrs=new Map(); // active pointers
 let gesture=null;   // {mode, ...}
+let hadPinch=false, lastPinchEnd=0;
 const TAP_MOVE=8, TAP_TIME=350;
 
 function onDown(e){
@@ -577,6 +622,7 @@ function onDown(e){
       gesture={mode:"pan",moved:false,x0:e.clientX,y0:e.clientY,t:Date.now()};
     }
   }else if(ptrs.size===2){
+    hadPinch=true;
     const p=[...ptrs.values()];
     gesture={mode:"pinch",d0:dist(p[0],p[1]),s0:cam.scale,
              mx:(p[0].x+p[1].x)/2,my:(p[0].y+p[1].y)/2,
@@ -631,7 +677,7 @@ function onUp(e){
     if(gesture.mode==="node" && gesture.node){ gesture.node._drag=false; kick(0.35); save(); }
   }
   ptrs.delete(e.pointerId);
-  if(ptrs.size===0){ gesture=null; interacting=false; save(); }
+  if(ptrs.size===0){ gesture=null; interacting=false; if(hadPinch){ lastPinchEnd=Date.now(); hadPinch=false; } save(); }
   else if(ptrs.size===1){ // dropped to one finger -> resume pan
     const p=[...ptrs.entries()][0]; _prev[p[0]]={x:p[1].x,y:p[1].y};
     gesture={mode:"pan",moved:true,x0:p[1].x,y0:p[1].y,t:Date.now()};
@@ -651,9 +697,11 @@ canvas.addEventListener("wheel",e=>{
   const f=Math.exp(-e.deltaY*0.0015);
   zoomAt(e.clientX,e.clientY, clamp(cam.scale*f,0.12,5));
 },{passive:false});
-// double-tap / double-click to zoom in
+// double-tap / double-click to zoom in (never right after a pinch, never mid multi-touch)
 let lastTap=0;
 canvas.addEventListener("pointerup",e=>{
+  if(ptrs.size>0) return;                     // other fingers still down
+  if(Date.now()-lastPinchEnd<600) return;     // just finished pinching — ignore
   const now=Date.now();
   if(now-lastTap<300 && !nodeAt(e.clientX,e.clientY)){ zoomAt(e.clientX,e.clientY,clamp(cam.scale*1.8,0.12,5)); }
   lastTap=now;
@@ -697,11 +745,21 @@ const scrim=document.getElementById("scrim");
 const sheet=document.getElementById("sheet");
 let sheetOpen=false;
 function openSheet(html){
-  sheet.innerHTML='<div class="grab"></div>'+html;
+  sheet.scrollTop=0; sheet.style.transform="";
+  sheet.innerHTML='<div class="sheet-top"><div class="grab"></div><button class="sheet-x" id="__sx" aria-label="Close">&#10005;</button></div>'+html;
+  const x=document.getElementById("__sx"); if(x) x.onclick=closeSheet;
+  wireSheetSwipe();
   scrim.classList.add("on"); sheet.classList.add("on"); sheetOpen=true;
 }
-function closeSheet(){ scrim.classList.remove("on"); sheet.classList.remove("on"); sheetOpen=false; }
+function closeSheet(){ scrim.classList.remove("on"); sheet.classList.remove("on"); sheet.style.transform=""; sheetOpen=false; }
 scrim.addEventListener("click",closeSheet);
+function wireSheetSwipe(){
+  const top=sheet.querySelector(".sheet-top"); if(!top) return;
+  let y0=null, dy=0;
+  top.addEventListener("touchstart",e=>{ y0=e.touches[0].clientY; dy=0; sheet.style.transition="none"; },{passive:true});
+  top.addEventListener("touchmove",e=>{ if(y0==null) return; dy=Math.max(0,e.touches[0].clientY-y0); sheet.style.transform="translateY("+dy+"px)"; },{passive:true});
+  top.addEventListener("touchend",()=>{ sheet.style.transition=""; if(dy>110){ closeSheet(); } else { sheet.style.transform=""; } y0=null; });
+}
 
 function toast(msg){
   const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("on");
@@ -801,7 +859,8 @@ function openDetail(n){
       <div class="chip" id="addP" style="color:#fff">+ Person met through ${esc(firstName(n.name))}</div>
     </div>
     <div class="chips" style="margin-top:8px">
-      <div class="chip" id="addL" style="color:#fff">+ Place / group</div>
+      <div class="chip" id="addL" style="color:#fff">+ Place</div>
+      <div class="chip" id="addE" style="color:#fff">+ Event</div>
     </div>
 
     <button class="btn ghost" id="dEdit">Edit</button>
@@ -817,32 +876,37 @@ function openDetail(n){
   document.getElementById("dDraft").onclick=()=>openDraft(n);
   document.getElementById("dSummary").onclick=()=>summarizePerson(n);
   document.getElementById("addP").onclick=()=>openPersonForm(null,n.id);
-  document.getElementById("addL").onclick=()=>openPlaceForm(null,n.id);
+  document.getElementById("addL").onclick=()=>openPlaceForm(null,n.id,"place");
+  document.getElementById("addE").onclick=()=>openPlaceForm(null,n.id,"event");
   document.getElementById("dEdit").onclick=()=>openPersonForm(n,n.parentId);
   document.getElementById("dFocus").onclick=()=>{ closeSheet(); focusNode(n); };
   document.getElementById("dDel").onclick=()=>delNode(n);
 }
 
 function openPlaceDetail(n){
-  const col=PLACE_C;
+  const col=nodeColor(n);
+  const isEvent=n.type==="event";
   const people=n._desc||0;
+  const defEmoji=isEvent?"🎉":"📍";
   openSheet(`
-    <div class="sh-title">${n.emoji||"📍"} ${esc(n.name)}</div>
-    <div class="sh-sub">${esc(n.description||"Place / group")} &middot; ${people} connection${people===1?"":"s"}</div>
+    <div class="sh-title">${n.emoji||defEmoji} ${esc(n.name)}</div>
+    <div class="sh-sub">${esc(n.description||(isEvent?"Event":"Place / group"))} &middot; ${people} ${people===1?"person":"people"}</div>
     ${n.notes?`<label class="fl">Notes</label><div style="font-size:14px;color:rgba(255,255,255,0.85);white-space:pre-wrap">${esc(n.notes)}</div>`:""}
-    <label class="fl">Who do you know here?</label>
+    <label class="fl">${isEvent?"Who did you meet here?":"Who do you know here?"}</label>
     <div class="chips">
-      <div class="chip" id="addP" style="color:#fff">+ Add a person here</div>
-      <div class="chip" id="addL" style="color:#fff">+ Add a sub-place</div>
+      <div class="chip" id="addP" style="color:#fff">+ Person</div>
+      <div class="chip" id="addL" style="color:#fff">+ Sub-place</div>
+      <div class="chip" id="addE" style="color:#fff">+ Event</div>
     </div>
     <button class="btn primary" id="pFocus" style="background:${col};color:#fff">Center on ${esc(n.name)}</button>
     <button class="btn ghost" id="pEdit">Edit</button>
     <button class="btn danger" id="pDel">Remove from Orbit</button>
   `);
   document.getElementById("addP").onclick=()=>openPersonForm(null,n.id);
-  document.getElementById("addL").onclick=()=>openPlaceForm(null,n.id);
+  document.getElementById("addL").onclick=()=>openPlaceForm(null,n.id,"place");
+  document.getElementById("addE").onclick=()=>openPlaceForm(null,n.id,"event");
   document.getElementById("pFocus").onclick=()=>{ closeSheet(); focusNode(n); };
-  document.getElementById("pEdit").onclick=()=>openPlaceForm(n,n.parentId);
+  document.getElementById("pEdit").onclick=()=>openPlaceForm(n,n.parentId,n.type);
   document.getElementById("pDel").onclick=()=>delNode(n);
 }
 
@@ -850,14 +914,16 @@ function openPlaceDetail(n){
 function openAddPicker(){
   openSheet(`
     <div class="sh-title">Add to your orbit</div>
-    <div class="sh-sub">Branch out a person, or a place full of people</div>
+    <div class="sh-sub">A person, a place, or an event where you met people</div>
     <div class="chips" style="margin-top:18px">
-      <div class="chip" id="tP" style="color:#fff;padding:22px 6px">&#128100;<div style="margin-top:8px">Person</div></div>
-      <div class="chip" id="tL" style="color:#fff;padding:22px 6px">&#127970;<div style="margin-top:8px">Place</div></div>
+      <div class="chip" id="tP" style="color:#fff;padding:20px 6px">&#128100;<div style="margin-top:8px">Person</div></div>
+      <div class="chip" id="tL" style="color:#fff;padding:20px 6px">&#127970;<div style="margin-top:8px">Place</div></div>
+      <div class="chip" id="tE" style="color:#fff;padding:20px 6px">&#127881;<div style="margin-top:8px">Event</div></div>
     </div>
   `);
   document.getElementById("tP").onclick=()=>openPersonForm(null,"me");
-  document.getElementById("tL").onclick=()=>openPlaceForm(null,"me");
+  document.getElementById("tL").onclick=()=>openPlaceForm(null,"me","place");
+  document.getElementById("tE").onclick=()=>openPlaceForm(null,"me","event");
 }
 
 /* ---------- parent selector options ---------- */
@@ -865,7 +931,7 @@ function parentOptions(selected,excludeId){
   const opts=[`<option value="me" ${selected==="me"?"selected":""}>${esc(ME.name)} (you)</option>`];
   state.nodes.forEach(n=>{
     if(n.id===excludeId) return;
-    const pfx=n.type==="place"?"📍 ":"";
+    const pfx=n.type==="place"?"📍 ":n.type==="event"?"🎉 ":"";
     opts.push(`<option value="${n.id}" ${selected===n.id?"selected":""}>${pfx}${esc(n.name)}</option>`);
   });
   return opts.join("");
@@ -920,13 +986,21 @@ function openPersonForm(node, parentId){
     ${introOpts?`<label class="fl">Introduced by (optional)</label>
       <select id="fIntro"><option value="">— nobody —</option>${introOpts}</select>`:""}
 
+    <label class="fl">Photo (optional)</label>
+    <div class="row" style="gap:12px;align-items:center">
+      <div id="photoPrev" class="photoPrev" style="${d.photo?`background-image:url('${d.photo}')`:""}"></div>
+      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo"}</button>
+    </div>
+    <input type="file" id="photoFile" accept="image/*" class="hidden"/>
+
     <label class="fl">Notes (optional)</label>
     <textarea id="fNotes" placeholder="How you met, what to remember...">${esc(d.notes||"")}</textarea>
 
     <button class="btn primary" id="fSave">${isEdit?"Save changes":"Add to Orbit"}</button>
   `);
 
-  let cat=d.category||"friend", cad=+d.cadenceDays||0;
+  let cat=d.category||"friend", cad=+d.cadenceDays||0, photoData=d.photo||"";
+  wirePhoto(()=>photoData,(v)=>{photoData=v;});
   sheet.querySelectorAll(".cat").forEach(c=>c.onclick=()=>{ cat=c.dataset.k;
     sheet.querySelectorAll(".cat").forEach(x=>{x.classList.remove("on");x.style.background="";x.style.borderColor="";});
     c.classList.add("on"); c.style.background=CAT[cat].c; c.style.borderColor=CAT[cat].c;
@@ -954,6 +1028,7 @@ function openPersonForm(node, parentId){
       socials,
       introducedById: document.getElementById("fIntro")?document.getElementById("fIntro").value||null:(d.introducedById||null),
       notes:document.getElementById("fNotes").value.trim(),
+      photo: photoData||"",
     };
     if(cad && !d.lastContact && !isEdit) patch.lastContact=Date.now();
     if(isEdit){ Object.assign(node,patch); }
@@ -964,43 +1039,59 @@ function openPersonForm(node, parentId){
   };
 }
 
-/* ---------- PLACE FORM ---------- */
-function openPlaceForm(node, parentId){
+/* ---------- PLACE / EVENT FORM ---------- */
+function openPlaceForm(node, parentId, type){
   const isEdit=!!node; const d=node||{};
-  const emojis=["📍","🏢","🎓","🏠","✈️","🍻","⚽","🏋️","🎼","💼","🍷","🏖️","🌄","🚀"];
+  const t = isEdit ? (node.type||"place") : (type||"place");
+  const isEvent = t==="event";
+  const cc = isEvent?EVENT_C:PLACE_C;
+  const emojis = isEvent
+    ? ["🎉","🥂","🎤","🏟️","🎪","🎓","💼","🍷","🎶","🏝️","⛰️","🚀","🤝","🎂"]
+    : ["📍","🏢","🎓","🏠","✈️","🍻","⚽","🏋️","🎼","💼","🍷","🏖️","🌄","🚀"];
+  const defEmoji = isEvent?"🎉":"📍";
   openSheet(`
-    <div class="sh-title">${isEdit?"Edit place":"Add place"}</div>
-    <div class="sh-sub">A city, school, workplace, club… people branch off it</div>
+    <div class="sh-title">${isEdit?("Edit "+t):("Add "+t)}</div>
+    <div class="sh-sub">${isEvent?"An event, trip, or party where you met people":"A city, school, workplace or club — people branch off it"}</div>
     <label class="fl">Name</label>
-    <input id="pName" value="${esc(d.name||"")}" placeholder="e.g. Amsterdam, RSM, NLC" autocomplete="off"/>
+    <input id="pName" value="${esc(d.name||"")}" placeholder="${isEvent?"e.g. Web Summit 2026, Sarah's wedding":"e.g. Amsterdam, RSM, NLC"}" autocomplete="off"/>
     <label class="fl">Icon</label>
     <div class="chips" id="emo" style="flex-wrap:wrap">
-      ${emojis.map(e=>`<div class="chip em ${d.emoji===e?'on':''}" data-e="${e}" style="flex:0 0 auto;padding:10px 12px;font-size:18px;${d.emoji===e?'background:rgba(191,90,242,0.3);border-color:'+PLACE_C:''}">${e}</div>`).join("")}
+      ${emojis.map(e=>`<div class="chip em ${d.emoji===e?'on':''}" data-e="${e}" style="flex:0 0 auto;padding:10px 12px;font-size:18px;${d.emoji===e?'background:'+hexA(cc,0.3)+';border-color:'+cc:''}">${e}</div>`).join("")}
     </div>
     <label class="fl">What is it? (optional)</label>
-    <input id="pDesc" value="${esc(d.description||"")}" placeholder="University, city, workplace..." autocomplete="off"/>
+    <input id="pDesc" value="${esc(d.description||"")}" placeholder="${isEvent?"Conference, wedding, trip...":"University, city, workplace..."}" autocomplete="off"/>
     <label class="fl">Branch from</label>
     <select id="pParent">${parentOptions(parentId||d.parentId||"me", node&&node.id)}</select>
+
+    <label class="fl">Photo (optional)</label>
+    <div class="row" style="gap:12px;align-items:center">
+      <div id="photoPrev" class="photoPrev" style="${d.photo?`background-image:url('${d.photo}')`:""}"></div>
+      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo"}</button>
+    </div>
+    <input type="file" id="photoFile" accept="image/*" class="hidden"/>
+
     <label class="fl">Notes (optional)</label>
-    <textarea id="pNotes" placeholder="Anything to remember about this place">${esc(d.notes||"")}</textarea>
-    <button class="btn primary" id="pSave">${isEdit?"Save changes":"Create place"}</button>
+    <textarea id="pNotes" placeholder="Anything to remember">${esc(d.notes||"")}</textarea>
+    <button class="btn primary" id="pSave">${isEdit?"Save changes":("Create "+t)}</button>
   `);
-  let emoji=d.emoji||"📍";
+  let emoji=d.emoji||defEmoji, photoData=d.photo||"";
+  wirePhoto(()=>photoData,(v)=>{photoData=v;});
   sheet.querySelectorAll(".em").forEach(c=>c.onclick=()=>{ emoji=c.dataset.e;
     sheet.querySelectorAll(".em").forEach(x=>{x.classList.remove("on");x.style.background="";x.style.borderColor="";});
-    c.classList.add("on"); c.style.background="rgba(191,90,242,0.3)"; c.style.borderColor=PLACE_C; haptic();
+    c.classList.add("on"); c.style.background=hexA(cc,0.3); c.style.borderColor=cc; haptic();
   });
   document.getElementById("pSave").onclick=()=>{
     const name=document.getElementById("pName").value.trim();
-    if(!name){ toast("Name the place"); return; }
-    const patch={ type:"place", name, emoji,
+    if(!name){ toast("Name it first"); return; }
+    const patch={ type:t, name, emoji,
       description:document.getElementById("pDesc").value.trim(),
       parentId:document.getElementById("pParent").value,
-      notes:document.getElementById("pNotes").value.trim() };
+      notes:document.getElementById("pNotes").value.trim(),
+      photo: photoData||"" };
     if(isEdit){ Object.assign(node,patch); }
     else{ state.nodes.push(Object.assign({id:uid()},patch)); }
     rebuild(); save(); kick(0.9); refreshChrome();
-    closeSheet(); toast(isEdit?"Saved":"Place created"); haptic(18);
+    closeSheet(); toast(isEdit?"Saved":(isEvent?"Event created":"Place created")); haptic(18);
     if(!isEdit){ const added=state.nodes[state.nodes.length-1]; setTimeout(()=>focusNode(added),120); }
   };
 }
@@ -1066,8 +1157,8 @@ function openSearch(){
   const render=(q)=>{
     const f=list.filter(n=>n.name.toLowerCase().includes(q.toLowerCase()));
     return f.map(n=>`<div class="rem-item" data-id="${n.id}">
-      <div class="dot" style="background:${hexA(nodeColor(n),0.22)};color:${nodeColor(n)}">${n.type==="place"?(n.emoji||"📍"):initials(n.name)}</div>
-      <div style="flex:1"><div class="nm">${esc(n.name)}</div><div class="ds">${n.type==="place"?"Place":(CAT[n.category]||{}).label||"Person"}</div></div>
+      <div class="dot" style="background:${hexA(nodeColor(n),0.22)};color:${nodeColor(n)}">${isContainerType(n.type)?(n.emoji||(n.type==="event"?"🎉":"📍")):initials(n.name)}</div>
+      <div style="flex:1"><div class="nm">${esc(n.name)}</div><div class="ds">${n.type==="place"?"Place":n.type==="event"?"Event":(CAT[n.category]||{}).label||"Person"}</div></div>
       <div class="go">&#8250;</div></div>`).join("") || `<div style="text-align:center;color:var(--txt2);padding:30px">No matches</div>`;
   };
   openSheet(`<div class="sh-title">Find</div><input id="sq" placeholder="Search people and places" autocomplete="off" style="margin-top:12px"/><div id="sres" style="margin-top:10px">${render("")}</div>`);
