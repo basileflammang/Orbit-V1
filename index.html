@@ -1199,7 +1199,7 @@ function openMenu(){
     <input type="file" id="mVcfFile" accept=".vcf,text/vcard" class="hidden"/>
     <button class="btn ghost" id="mAI">${aiReady()?"AI copilot &middot; on":"Set up AI copilot"}</button>
     ${(gistCfg()&&gistCfg().token)
-      ? `<button class="btn ghost" id="mSyncNow">Cloud &middot; sync now</button><button class="btn ghost" id="mPull">Cloud &middot; pull from cloud</button><button class="btn ghost" id="mDisc">Cloud &middot; disconnect</button>`
+      ? `<button class="btn primary" id="mSyncNow">Sync now (two-way)</button><button class="btn ghost" id="mPull">Force pull from cloud</button><button class="btn ghost" id="mDisc">Disconnect cloud</button>`
       : `<button class="btn ghost" id="mCloud">Set up free cloud sync</button>`}
 
     <label class="fl">General</label>
@@ -1224,8 +1224,8 @@ function openMenu(){
   document.getElementById("mVcfFile").onchange=importVCF;
   document.getElementById("mAI").onclick=openAISetup;
   { const x=document.getElementById("mCloud"); if(x) x.onclick=openCloudSetup; }
-  { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); const r=await gistPush(); toast(r.ok?"Synced to cloud":"Sync failed: "+(r.err||"")); }; }
-  { const x=document.getElementById("mPull"); if(x) x.onclick=async()=>{ toast("Pulling…"); const r=await gistPull(); if(r.ok&&r.data){ applyBackup(r.data,"replace"); toast("Pulled from cloud"); } else toast("Pull failed: "+(r.err||"")); }; }
+  { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); await syncNow(false); }; }
+  { const x=document.getElementById("mPull"); if(x) x.onclick=async()=>{ toast("Refreshing…"); let c=gistCfg(); if(c&&!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } } const r=await gistPull(); if(r.ok&&r.data){ const a=mergeCloudNodes(normNodes(r.data)); if(a){ save(); kick(0.8); refreshChrome(); } toast(a?("Pulled · "+a+" new"):"Up to date"); } else toast("Pull failed: "+(r.err||"")); }; }
   { const x=document.getElementById("mDisc"); if(x) x.onclick=()=>{ setGistCfg(null); toast("Cloud disconnected"); openMenu(); }; }
   document.getElementById("mFit").onclick=()=>{ closeSheet(); fitAll(); };
   document.getElementById("mName").onclick=openMeSheet;
@@ -1437,7 +1437,7 @@ function setGistCfg(c){ try{ if(!c) localStorage.removeItem(GIST_KEY); else loca
 function syncSoon(){
   const c=gistCfg(); if(!c||!c.token) return;
   clearTimeout(syncTimer);
-  syncTimer=setTimeout(()=>{ gistPush().catch(()=>{}); }, 3500);
+  syncTimer=setTimeout(()=>{ syncNow(true).catch(()=>{}); }, 3500);
 }
 async function gistPush(){
   const c=gistCfg(); if(!c||!c.token) return {ok:false,err:"no token"};
@@ -1471,17 +1471,33 @@ async function gistFind(){
     return hit ? hit.id : null;
   }catch(e){ return null; }
 }
+// union-merge cloud nodes into local by id (never loses either side's additions)
+function mergeCloudNodes(incoming){
+  if(!Array.isArray(incoming)) return 0;
+  const have=new Set(state.nodes.map(n=>n.id));
+  let added=0;
+  incoming.forEach(n=>{ if(n && n.id && !have.has(n.id)){ state.nodes.push(Object.assign({},n,{x:null,y:null})); added++; } });
+  if(added){ repairParents(); rebuild(); }
+  return added;
+}
+// two-way: pull + merge + push, so adding on any device shows up everywhere
+async function syncNow(silent){
+  const c0=gistCfg(); if(!c0||!c0.token){ if(!silent) toast("Set up cloud sync first"); return false; }
+  try{
+    let c=gistCfg();
+    if(!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } }
+    let added=0;
+    if(gistCfg().id){ const r=await gistPull(); if(r.ok && r.data){ added=mergeCloudNodes(normNodes(r.data)); } }
+    if(added){ save(); kick(0.8); refreshChrome(); if(listOpen) renderList(); }
+    const p=await gistPush();
+    try{ localStorage.setItem("orbit.lastlocal",String(Date.now())); }catch(e){}
+    if(!silent) toast(p.ok ? (added? ("Synced · "+added+" new from your other device") : "Synced — everything's up to date") : "Sync failed: "+(p.err||"check token"));
+    return p.ok;
+  }catch(e){ if(!silent) toast("Sync error — use a classic token with the gist scope"); return false; }
+}
 async function cloudBootSync(){
   const c=gistCfg(); if(!c||!c.token) return;
-  try{
-    if(!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } else return; }
-    const r=await gistPull();
-    if(r.ok && r.data){
-      const cloudExp=r.data.exported? Date.parse(r.data.exported):0;
-      const localExp=+(localStorage.getItem("orbit.lastlocal")||0);
-      if(state.nodes.length===0 || cloudExp>localExp+2000){ applyBackup(r.data,"replace"); toast("Synced from cloud"); }
-    }
-  }catch(e){}
+  await syncNow(true);
 }
 function openCloudSetup(){
   openSheet(`<div class="sh-title">Cloud sync</div>
@@ -1500,21 +1516,8 @@ function openCloudSetup(){
     const prev=gistCfg();
     setGistCfg({token:t, id:(prev&&prev.id)||null});
     toast("Connecting…");
-    try{
-      let c=gistCfg();
-      // join the SAME cloud file this token already has, so all devices link together
-      if(!c.id){ const found=await gistFind(); if(found){ c.id=found; setGistCfg(c); } }
-      if(c.id){
-        const r=await gistPull();
-        if(r.ok && r.data){
-          applyBackup(r.data, state.nodes.length? "merge" : "replace");
-          toast("Connected — synced from cloud"); openMenu(); return;
-        }
-      }
-      const r2=await gistPush();
-      if(r2.ok){ try{localStorage.setItem("orbit.lastlocal",String(Date.now()));}catch(e){} toast("Cloud sync on"); openMenu(); }
-      else { setGistCfg(null); toast("Failed: "+(r2.err||"check token")); }
-    }catch(e){ setGistCfg(prev||null); toast("Connection error — check token"); }
+    const ok=await syncNow(false);   // finds/creates the shared file, then two-way syncs
+    if(ok){ openMenu(); } else { setGistCfg(prev||null); }
   };
 }
 
