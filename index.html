@@ -222,7 +222,7 @@ const FS = '-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif'
    STATE + PERSISTENCE
 ============================================================ */
 const KEY = "orbit.state.v3";
-let state = { userName:null, nodes:[], cam:null };
+let state = { userName:null, nodes:[], cam:null, tombstones:{} };
 let ME = { id:"me", type:"me", name:"Me", parentId:null, x:0, y:0, vx:0, vy:0 };
 
 function load(){
@@ -238,6 +238,7 @@ function load(){
       state.userName = s.userName ?? null;
       state.nodes = Array.isArray(s.nodes) ? s.nodes : [];
       state.cam = s.cam || null;
+      state.tombstones = (s.tombstones && typeof s.tombstones==="object") ? s.tombstones : {};
       if(s.me){ ME = Object.assign(ME, s.me); }
     }
   }catch(e){}
@@ -250,7 +251,8 @@ function save(){
       localStorage.setItem(KEY, JSON.stringify({
         userName: state.userName, nodes: state.nodes,
         me:{x:ME.x,y:ME.y,name:ME.name},
-        cam:{x:cam.x,y:cam.y,scale:cam.scale}
+        cam:{x:cam.x,y:cam.y,scale:cam.scale},
+        tombstones: state.tombstones
       }));
       localStorage.setItem("orbit.lastlocal", String(Date.now()));
     }catch(e){}
@@ -1036,7 +1038,7 @@ function openPersonForm(node, parentId){
     };
     if(cad && !d.lastContact && !isEdit) patch.lastContact=Date.now();
     if(isEdit){ Object.assign(node,patch); }
-    else{ const nn=Object.assign({id:uid(),lastContact:patch.lastContact||null},patch); state.nodes.push(nn); }
+    else{ const nn=Object.assign({id:uid(),createdAt:Date.now(),lastContact:patch.lastContact||null},patch); if(state.tombstones) delete state.tombstones[idKey(nn)]; state.nodes.push(nn); }
     rebuild(); save(); kick(0.9); refreshChrome();
     closeSheet(); toast(isEdit?"Saved":"Added to your orbit"); haptic(18);
     if(!isEdit){ const added=state.nodes[state.nodes.length-1]; setTimeout(()=>focusNode(added),120); }
@@ -1093,7 +1095,7 @@ function openPlaceForm(node, parentId, type){
       notes:document.getElementById("pNotes").value.trim(),
       photo: photoData||"" };
     if(isEdit){ Object.assign(node,patch); }
-    else{ state.nodes.push(Object.assign({id:uid()},patch)); }
+    else{ const nn=Object.assign({id:uid(),createdAt:Date.now()},patch); if(state.tombstones) delete state.tombstones[idKey(nn)]; state.nodes.push(nn); }
     rebuild(); save(); kick(0.9); refreshChrome();
     closeSheet(); toast(isEdit?"Saved":(isEvent?"Event created":"Place created")); haptic(18);
     if(!isEdit){ const added=state.nodes[state.nodes.length-1]; setTimeout(()=>focusNode(added),120); }
@@ -1109,6 +1111,7 @@ function delNode(n){
   `);
   document.getElementById("cCancel").onclick=()=>openDetail(n);
   document.getElementById("cDel").onclick=()=>{
+    tombstone(n);
     const newParent=n.parentId||"me";
     state.nodes=state.nodes.filter(x=>x.id!==n.id)
       .map(x=>x.parentId===n.id?Object.assign(x,{parentId:newParent}):x)
@@ -1176,7 +1179,7 @@ function openSearch(){
 function backupJSON(){
   // include each node's full ancestor path so any future version can rebuild the whole tree
   const nodes = state.nodes.map(n=>Object.assign({}, n, {_kids:undefined,_desc:undefined,_r:undefined,_drag:undefined, path:pathOf(n)}));
-  return JSON.stringify({app:"orbit",version:4,userName:state.userName,me:{name:ME.name},nodes,exported:new Date().toISOString()},null,2);
+  return JSON.stringify({app:"orbit",version:4,userName:state.userName,me:{name:ME.name},nodes,tombstones:state.tombstones||{},exported:new Date().toISOString()},null,2);
 }
 function openMenu(){
   const ppl=state.nodes.filter(n=>n.type==="person").length;
@@ -1194,6 +1197,7 @@ function openMenu(){
 
     <label class="fl">Power-ups</label>
     <button class="btn ghost" id="mList">List / reconnect view</button>
+    <button class="btn ghost" id="mDedupe">Remove duplicates</button>
     <button class="btn ghost" id="mICS">Add reminders to calendar (.ics)</button>
     <button class="btn ghost" id="mVCF">Import phone contacts (.vcf)</button>
     <input type="file" id="mVcfFile" accept=".vcf,text/vcard" class="hidden"/>
@@ -1219,6 +1223,7 @@ function openMenu(){
   document.getElementById("mImport").onclick=()=>document.getElementById("mFile").click();
   document.getElementById("mFile").onchange=importFile;
   document.getElementById("mList").onclick=()=>{ closeSheet(); toggleList(true); };
+  { const x=document.getElementById("mDedupe"); if(x) x.onclick=()=>{ const n=dedupe(); save(); kick(0.5); refreshChrome(); if(listOpen) renderList(); toast(n?("Merged "+n+" duplicate"+(n===1?"":"s")):"No duplicates found"); }; }
   document.getElementById("mICS").onclick=exportICS;
   document.getElementById("mVCF").onclick=()=>document.getElementById("mVcfFile").click();
   document.getElementById("mVcfFile").onchange=importVCF;
@@ -1322,7 +1327,7 @@ function ensurePath(pathArr){
   let parent="me";
   for(const step of (pathArr||[])){
     let found=state.nodes.find(n=>n.name===step.name && n.type===step.type && n.parentId===parent);
-    if(!found){ found={id:uid(),type:step.type,name:step.name,parentId:parent,x:null,y:null};
+    if(!found){ found={id:uid(),createdAt:Date.now(),type:step.type,name:step.name,parentId:parent,x:null,y:null};
       if(step.type==="person"){ found.category="friend"; found.closeness=5; found.socials={}; found.cadenceDays=0; }
       state.nodes.push(found); }
     parent=found.id;
@@ -1338,6 +1343,49 @@ function repairParents(){
   });
   state.nodes.forEach(n=>{ delete n.path; });
 }
+
+/* ---------- identity, de-duplication & tombstones ---------- */
+function idKey(n){ return n.type+"|"+(n.name||"").trim().toLowerCase()+"|"+pathString(n).toLowerCase(); }
+function mergeFields(keep,dup){
+  ["photo","birthday","notes","emoji","description","introducedById","category","color","city"].forEach(f=>{ if(!keep[f] && dup[f]) keep[f]=dup[f]; });
+  if(dup.closeness && (dup.closeness>(keep.closeness||0))) keep.closeness=dup.closeness;
+  if(dup.socials) keep.socials=Object.assign({}, dup.socials, keep.socials||{});
+  if(dup.lastContact && (!keep.lastContact || dup.lastContact>keep.lastContact)) keep.lastContact=dup.lastContact;
+  if(dup.cadenceDays && !keep.cadenceDays) keep.cadenceDays=dup.cadenceDays;
+  if(dup.createdAt && (!keep.createdAt || dup.createdAt<keep.createdAt)) keep.createdAt=dup.createdAt;
+}
+// collapse bubbles that are the same thing (same type + name + place), deterministically (smallest id wins)
+function dedupe(){
+  rebuild();
+  const groups={};
+  state.nodes.forEach(n=>{ const k=idKey(n); (groups[k]||(groups[k]=[])).push(n); });
+  const canon={}; let removed=0;
+  Object.keys(groups).forEach(k=>{
+    const g=groups[k]; if(g.length<2) return;
+    g.sort((a,b)=> String(a.id)<String(b.id)?-1:1);
+    const keep=g[0];
+    for(let i=1;i<g.length;i++){ mergeFields(keep,g[i]); canon[g[i].id]=keep.id; removed++; }
+  });
+  if(removed){
+    const rm=new Set(Object.keys(canon));
+    state.nodes=state.nodes.filter(x=>!rm.has(x.id));
+    state.nodes.forEach(x=>{ if(canon[x.parentId]) x.parentId=canon[x.parentId]; if(x.introducedById&&canon[x.introducedById]) x.introducedById=canon[x.introducedById]; });
+    rebuild();
+  }
+  return removed;
+}
+function tombstone(n){ if(!state.tombstones) state.tombstones={}; state.tombstones[idKey(n)]=Date.now(); }
+// remove nodes that were deleted (on any device) after they were created
+function applyTombstones(){
+  const t=state.tombstones; if(!t) return 0;
+  rebuild();
+  const before=state.nodes.length;
+  state.nodes=state.nodes.filter(n=>{ const ts=t[idKey(n)]; return !(ts && (n.createdAt||0) < ts); });
+  const removed=before-state.nodes.length;
+  if(removed) rebuild();
+  return removed;
+}
+function pruneTombstones(){ const t=state.tombstones||{}; const cut=Date.now()-120*DAY; for(const k in t){ if(t[k]<cut) delete t[k]; } }
 
 /* ============================================================
    LIST / RECONNECT VIEW
@@ -1474,10 +1522,12 @@ async function gistFind(){
 // union-merge cloud nodes into local by id (never loses either side's additions)
 function mergeCloudNodes(incoming){
   if(!Array.isArray(incoming)) return 0;
+  rebuild();
+  const beforeKeys=new Set(state.nodes.map(idKey));
   const have=new Set(state.nodes.map(n=>n.id));
-  let added=0;
-  incoming.forEach(n=>{ if(n && n.id && !have.has(n.id)){ state.nodes.push(Object.assign({},n,{x:null,y:null})); added++; } });
-  if(added){ repairParents(); rebuild(); }
+  incoming.forEach(n=>{ if(n && n.id && !have.has(n.id)){ state.nodes.push(Object.assign({},n,{x:null,y:null})); } });
+  repairParents(); dedupe(); applyTombstones();
+  let added=0; state.nodes.forEach(n=>{ if(!beforeKeys.has(idKey(n))) added++; });
   return added;
 }
 // two-way: pull + merge + push, so adding on any device shows up everywhere
@@ -1487,7 +1537,10 @@ async function syncNow(silent){
     let c=gistCfg();
     if(!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } }
     let added=0;
-    if(gistCfg().id){ const r=await gistPull(); if(r.ok && r.data){ added=mergeCloudNodes(normNodes(r.data)); } }
+    if(gistCfg().id){ const r=await gistPull(); if(r.ok && r.data){
+      if(r.data.tombstones){ if(!state.tombstones) state.tombstones={}; for(const k in r.data.tombstones){ state.tombstones[k]=Math.max(state.tombstones[k]||0, r.data.tombstones[k]); } }
+      added=mergeCloudNodes(normNodes(r.data));
+    } }
     if(added){ save(); kick(0.8); refreshChrome(); if(listOpen) renderList(); }
     const p=await gistPush();
     try{ localStorage.setItem("orbit.lastlocal",String(Date.now())); }catch(e){}
@@ -1560,7 +1613,7 @@ function confirmImportContacts(cards){
     <button class="btn ghost" id="ciNo">Cancel</button>`);
   document.getElementById("ciNo").onclick=openMenu;
   document.getElementById("ciYes").onclick=()=>{
-    cards.forEach(c=>state.nodes.push({id:uid(),type:"person",name:c.name,parentId:"me",category:"friend",color:CAT.friend.c,closeness:5,cadenceDays:0,lastContact:null,birthday:c.birthday||"",emoji:"",socials:c.socials||{},notes:"",introducedById:null,x:null,y:null}));
+    cards.forEach(c=>state.nodes.push({id:uid(),createdAt:Date.now(),type:"person",name:c.name,parentId:"me",category:"friend",color:CAT.friend.c,closeness:5,cadenceDays:0,lastContact:null,birthday:c.birthday||"",emoji:"",socials:c.socials||{},notes:"",introducedById:null,x:null,y:null}));
     rebuild(); save(); kick(1); refreshChrome(); closeSheet(); setTimeout(fitAll,400); toast("Added "+cards.length+" people");
   };
 }
@@ -1742,7 +1795,8 @@ function showApp(){
   document.getElementById("topbar").classList.remove("hidden");
   document.getElementById("controls").classList.remove("hidden");
   const hint=document.getElementById("hint"); hint.classList.remove("hidden");
-  refreshChrome(); rebuild(); kick(1);
+  rebuild(); const d=dedupe(); applyTombstones(); pruneTombstones(); if(d) save();
+  refreshChrome(); kick(1);
   setTimeout(()=>{ if(state.cam){ cam=state.cam; } fitAll(); },100);
   setTimeout(()=>runNotify(false),1500);
   cloudBootSync();
