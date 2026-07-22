@@ -300,15 +300,19 @@ function rebuild(){
   desc(ME);
   all.forEach(n=>{ n._r = radiusOf(n); });
 }
+const ME_R = 64;                 // the sun — always the largest
 function radiusOf(n){
-  if(n.type==="me") return 46;
+  if(n.type==="me") return ME_R;
+  const MAXO = ME_R*0.82;        // nothing else may exceed ~82% of you, no matter what
   const d = n._desc||0;
-  const descBonus = Math.sqrt(d)*8;
-  if(isContainerType(n.type)) return clamp(30 + descBonus*1.15, 32, 155);
-  // strong, adaptive gradient by closeness (1..10) plus who branches off them
+  if(isContainerType(n.type)){
+    // places / events grow with how many people branch off them
+    return clamp(26 + Math.sqrt(d)*9, 24, MAXO);
+  }
+  // person: closeness sets the base; branches push toward (but never past) the cap
   const imp = clamp(n.closeness||5, 1, 10);
-  const core = 14 + Math.pow(imp/10, 1.25) * 46;   // ~16 (distant) -> ~60 (inner circle)
-  return clamp(core + descBonus*0.8, 15, 115);
+  const core = 14 + Math.pow(imp/10, 1.3) * 32;   // closeness 1 -> ~15.6, closeness 10 -> ~46
+  return clamp(core + Math.sqrt(d)*6, 13, MAXO);
 }
 
 /* dates */
@@ -1456,9 +1460,21 @@ async function gistPull(){
   if(f.truncated && f.raw_url){ const r2=await fetch(f.raw_url); content=await r2.text(); }
   return {ok:true,data:JSON.parse(content)};
 }
-async function cloudBootSync(){
-  const c=gistCfg(); if(!c||!c.token||!c.id) return;
+async function gistFind(){
+  const c=gistCfg(); if(!c||!c.token) return null;
   try{
+    const res=await fetch("https://api.github.com/gists?per_page=100",
+      {headers:{"Authorization":"Bearer "+c.token,"Accept":"application/vnd.github+json"}});
+    if(!res.ok) return null;
+    const list=await res.json();
+    const hit=Array.isArray(list) && list.find(g=>g.files && g.files["orbit.json"]);
+    return hit ? hit.id : null;
+  }catch(e){ return null; }
+}
+async function cloudBootSync(){
+  const c=gistCfg(); if(!c||!c.token) return;
+  try{
+    if(!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } else return; }
     const r=await gistPull();
     if(r.ok && r.data){
       const cloudExp=r.data.exported? Date.parse(r.data.exported):0;
@@ -1481,10 +1497,24 @@ function openCloudSetup(){
   document.getElementById("gCancel").onclick=openMenu;
   document.getElementById("gConnect").onclick=async()=>{
     const t=document.getElementById("gTok").value.trim(); if(!t){ toast("Paste your token"); return; }
-    setGistCfg({token:t,id:null}); toast("Connecting…");
-    const r=await gistPush();
-    if(r.ok){ try{localStorage.setItem("orbit.lastlocal",String(Date.now()));}catch(e){} toast("Cloud sync on"); openMenu(); }
-    else { setGistCfg(null); toast("Failed: "+(r.err||"check token")); }
+    const prev=gistCfg();
+    setGistCfg({token:t, id:(prev&&prev.id)||null});
+    toast("Connecting…");
+    try{
+      let c=gistCfg();
+      // join the SAME cloud file this token already has, so all devices link together
+      if(!c.id){ const found=await gistFind(); if(found){ c.id=found; setGistCfg(c); } }
+      if(c.id){
+        const r=await gistPull();
+        if(r.ok && r.data){
+          applyBackup(r.data, state.nodes.length? "merge" : "replace");
+          toast("Connected — synced from cloud"); openMenu(); return;
+        }
+      }
+      const r2=await gistPush();
+      if(r2.ok){ try{localStorage.setItem("orbit.lastlocal",String(Date.now()));}catch(e){} toast("Cloud sync on"); openMenu(); }
+      else { setGistCfg(null); toast("Failed: "+(r2.err||"check token")); }
+    }catch(e){ setGistCfg(prev||null); toast("Connection error — check token"); }
   };
 }
 
