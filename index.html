@@ -158,6 +158,16 @@
   #lvBody .rem-item .ds{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   body.listmode #btnFit,body.listmode #btnZoomIn,body.listmode #btnZoomOut,body.listmode #hint{display:none !important;}
 
+  /* ---------- birthday wheel ---------- */
+  #bwheel{position:absolute;left:0;right:0;top:0;bottom:0;z-index:17;background:#000;overflow-y:auto;
+    padding:calc(var(--safe-t) + 16px) 16px calc(var(--safe-b) + 24px);display:flex;flex-direction:column;align-items:center;}
+  .bw-head{width:100%;max-width:460px;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  #bwWrap{width:100%;max-width:440px;}
+  #bwWrap svg{width:100%;height:auto;display:block;}
+  #bwInfo{width:100%;max-width:460px;margin-top:6px;}
+  #bwInfo .bw-row{display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:0.5px solid var(--line);cursor:pointer;}
+  #bwInfo .bw-row:last-child{border-bottom:none;}
+
   .hidden{display:none !important;}
 </style>
 </head>
@@ -175,6 +185,15 @@
     <div id="lvBody"></div>
   </div>
 
+  <div id="bwheel" class="hidden">
+    <div class="bw-head">
+      <div style="font-size:22px;font-weight:800;letter-spacing:-0.02em">Birthdays</div>
+      <div class="icobtn" id="bwClose" title="Close">&#10005;</div>
+    </div>
+    <div id="bwWrap"></div>
+    <div id="bwInfo"></div>
+  </div>
+
   <div id="topbar" class="hidden">
     <div>
       <div class="title">Orbit</div>
@@ -182,7 +201,7 @@
     </div>
     <div class="topbtns">
       <div class="icobtn" id="btnList" title="List view">&#9776;</div>
-      <div class="icobtn" id="btnSearch" title="Find">&#9906;</div>
+      <div class="icobtn" id="btnSearch" title="Find"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="7"/><line x1="21" y1="21" x2="16" y2="16"/></svg></div>
       <div class="icobtn" id="btnBell" title="Reminders">&#9993;<span class="badge hidden" id="bellBadge">0</span></div>
       <div class="icobtn" id="btnMenu" title="Menu">&#8942;</div>
     </div>
@@ -245,11 +264,12 @@ function load(){
 }
 let saveTimer=null;
 function save(){
+  cloudDirty=true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
     try{
       localStorage.setItem(KEY, JSON.stringify({
-        userName: state.userName, nodes: state.nodes,
+        userName: state.userName, nodes: plainNodes(),
         me:{x:ME.x,y:ME.y,name:ME.name},
         cam:{x:cam.x,y:cam.y,scale:cam.scale},
         tombstones: state.tombstones
@@ -290,6 +310,8 @@ function nodeColor(n){
 function isContainerType(t){ return t==="place"||t==="event"; }
 function allNodes(){ return [ME, ...state.nodes]; }
 function byId(id){ if(id==="me")return ME; return state.nodes.find(n=>n.id===id)||null; }
+// slim, serializable copy of nodes (drops runtime fields like _kids/_r; keeps x,y,pinned)
+function plainNodes(){ return state.nodes.map(n=>{ const o={}; for(const k in n){ if(k.charAt(0)!=="_") o[k]=n[k]; } return o; }); }
 
 /* structure: children + descendant counts + radius, recomputed on mutation */
 function rebuild(){
@@ -300,21 +322,19 @@ function rebuild(){
   // descendant count via DFS
   function desc(n){ let c=0; for(const k of n._kids){ c += 1 + desc(k); } n._desc=c; return c; }
   desc(ME);
-  all.forEach(n=>{ n._r = radiusOf(n); });
+  // assign radii top-down so each node can be sized relative to its parent
+  ME._r = ME_R;
+  (function assign(n){ for(const k of n._kids){ k._r = childRadius(k, n._r); assign(k); } })(ME);
 }
-const ME_R = 64;                 // the sun — always the largest
-function radiusOf(n){
-  if(n.type==="me") return ME_R;
-  const MAXO = ME_R*0.82;        // nothing else may exceed ~82% of you, no matter what
-  const d = n._desc||0;
-  if(isContainerType(n.type)){
-    // places / events grow with how many people branch off them
-    return clamp(26 + Math.sqrt(d)*9, 24, MAXO);
-  }
-  // person: closeness sets the base; branches push toward (but never past) the cap
-  const imp = clamp(n.closeness||5, 1, 10);
-  const core = 14 + Math.pow(imp/10, 1.3) * 32;   // closeness 1 -> ~15.6, closeness 10 -> ~46
-  return clamp(core + Math.sqrt(d)*6, 13, MAXO);
+const ME_R = 74;                 // the nucleus / sun — always the largest
+// Biological nesting: every node is a fraction of its PARENT, so depth reads instantly.
+// Big deltas are intentional — you zoom in for detail; the whole tree needn't be legible at once.
+function childRadius(n, parentR){
+  let f = 0.58;                                          // a child starts ~58% of its parent
+  if(n.type==="person") f += (((n.closeness||5)-5)/10) * 0.18;  // closeness nudges siblings ±
+  f += Math.min(Math.sqrt(n._desc||0)/7, 0.20);          // a hub with many branches grows a bit
+  f = clamp(f, 0.40, 0.80);                              // never <40% or >80% of its parent
+  return Math.max(5, parentR * f);
 }
 
 /* dates */
@@ -424,6 +444,7 @@ function stepSim(){
   for(const p of all){
     if(p===ME){ p.x=0; p.y=0; p.vx=0; p.vy=0; continue; }
     if(p._drag){ p.vx=0; p.vy=0; continue; }
+    if(p.pinned){ p.vx=0; p.vy=0; continue; }   // stays where you placed it
     p.vx*=0.82; p.vy*=0.82;
     const sp=Math.hypot(p.vx,p.vy); const MX=18; if(sp>MX){ p.vx=p.vx/sp*MX; p.vy=p.vy/sp*MX; }
     p.x += p.vx*simAlpha*1.4; p.y += p.vy*simAlpha*1.4;
@@ -529,6 +550,11 @@ function drawNode(n){
       ctx.beginPath(); ctx.arc(bx,by,Math.max(5,6*cam.scale),0,Math.PI*2);
       ctx.fillStyle=du===0?"#FFD60A":"#FF9F0A"; ctx.shadowColor="#FFD60A"; ctx.shadowBlur=du===0?14:6; ctx.fill(); ctx.shadowBlur=0;
     }
+  }
+  // pinned indicator (dashed halo)
+  if(n.pinned && n.type!=="me"){
+    ctx.save(); ctx.setLineDash([3,3]); ctx.lineWidth=Math.max(1,1.4*cam.scale);
+    ctx.strokeStyle="rgba(255,255,255,0.55)"; ctx.beginPath(); ctx.arc(sx,sy,r+3,0,Math.PI*2); ctx.stroke(); ctx.restore();
   }
   // selection ring
   if(n.id===selectedId){
@@ -656,9 +682,15 @@ function onMove(e){
 
   if(gesture.mode==="node"){
     if(gesture.moved){
-      gesture.node._drag=true;
-      gesture.node.x=toWorldX(e.clientX); gesture.node.y=toWorldY(e.clientY);
-      gesture.node.vx=0; gesture.node.vy=0; kick(0.5);
+      const nd=gesture.node; nd._drag=true;
+      // free to move, but distance from parent is bounded so the layout stays organized
+      const par=byId(nd.parentId)||ME;
+      let wx=toWorldX(e.clientX), wy=toWorldY(e.clientY);
+      let ddx=wx-(par.x||0), ddy=wy-(par.y||0); let dd=Math.hypot(ddx,ddy)||0.01;
+      const rest=(par._r||40)+(nd._r||18)+46;
+      const cl=clamp(dd, rest*0.55, rest*2.6);
+      nd.x=(par.x||0)+ddx/dd*cl; nd.y=(par.y||0)+ddy/dd*cl;
+      nd.vx=0; nd.vy=0; requestFrame();
     }
   }else if(gesture.mode==="maybeMe" || gesture.mode==="pan"){
     if(gesture.moved){
@@ -680,7 +712,7 @@ function onUp(e){
     const isTap = !gesture.moved && (Date.now()-gesture.t)<TAP_TIME;
     if(isTap && (gesture.mode==="node")){ openDetail(gesture.node); }
     else if(isTap && gesture.mode==="maybeMe"){ openMeSheet(); }
-    if(gesture.mode==="node" && gesture.node){ gesture.node._drag=false; kick(0.35); save(); }
+    if(gesture.mode==="node" && gesture.node){ gesture.node._drag=false; if(gesture.moved){ gesture.node.pinned=true; toast("Pinned here"); } kick(0.2); save(); }
   }
   ptrs.delete(e.pointerId);
   if(ptrs.size===0){ gesture=null; interacting=false; if(hadPinch){ lastPinchEnd=Date.now(); hadPinch=false; } save(); }
@@ -871,6 +903,7 @@ function openDetail(n){
 
     <button class="btn ghost" id="dEdit">Edit</button>
     <button class="btn primary" id="dFocus" style="background:rgba(255,255,255,0.08);color:#fff;border:0.5px solid var(--line2)">Center on ${esc(firstName(n.name))}</button>
+    <button class="btn ghost" id="dPin">${n.pinned?"📌 Release position":"📌 Pin in place"}</button>
     <button class="btn danger" id="dDel">Remove from Orbit</button>
   `);
 
@@ -886,6 +919,7 @@ function openDetail(n){
   document.getElementById("addE").onclick=()=>openPlaceForm(null,n.id,"event");
   document.getElementById("dEdit").onclick=()=>openPersonForm(n,n.parentId);
   document.getElementById("dFocus").onclick=()=>{ closeSheet(); focusNode(n); };
+  document.getElementById("dPin").onclick=()=>{ n.pinned=!n.pinned; save(); kick(n.pinned?0.1:0.8); toast(n.pinned?"Pinned in place":"Released — will float"); openDetail(n); };
   document.getElementById("dDel").onclick=()=>delNode(n);
 }
 
@@ -906,6 +940,7 @@ function openPlaceDetail(n){
     </div>
     <button class="btn primary" id="pFocus" style="background:${col};color:#fff">Center on ${esc(n.name)}</button>
     <button class="btn ghost" id="pEdit">Edit</button>
+    <button class="btn ghost" id="pPin">${n.pinned?"📌 Release position":"📌 Pin in place"}</button>
     <button class="btn danger" id="pDel">Remove from Orbit</button>
   `);
   document.getElementById("addP").onclick=()=>openPersonForm(null,n.id);
@@ -913,6 +948,7 @@ function openPlaceDetail(n){
   document.getElementById("addE").onclick=()=>openPlaceForm(null,n.id,"event");
   document.getElementById("pFocus").onclick=()=>{ closeSheet(); focusNode(n); };
   document.getElementById("pEdit").onclick=()=>openPlaceForm(n,n.parentId,n.type);
+  document.getElementById("pPin").onclick=()=>{ n.pinned=!n.pinned; save(); kick(n.pinned?0.1:0.8); toast(n.pinned?"Pinned in place":"Released — will float"); openPlaceDetail(n); };
   document.getElementById("pDel").onclick=()=>delNode(n);
 }
 
@@ -1153,8 +1189,9 @@ function openReminders(){
 
   const notifBtn = ("Notification" in window && Notification.permission!=="granted")
     ? `<button class="btn ghost" id="rNotif">Enable phone notifications</button>` : "";
-  openSheet(`<div class="sh-title">Reminders</div><div class="sh-sub">Birthdays & people to reconnect with</div>${body}${notifBtn}`);
+  openSheet(`<div class="sh-title">Reminders</div><div class="sh-sub">Birthdays & people to reconnect with</div>${body}<button class="btn ghost" id="rWheel">🎂 Birthday wheel</button>${notifBtn}`);
   sheet.querySelectorAll(".rem-item").forEach(it=>it.onclick=()=>{ const n=byId(it.dataset.id); if(n){ closeSheet(); focusNode(n); setTimeout(()=>openDetail(n),560); } });
+  document.getElementById("rWheel").onclick=()=>{ closeSheet(); openBirthdayWheel(); };
   const nb=document.getElementById("rNotif"); if(nb) nb.onclick=async()=>{ try{ const p=await Notification.requestPermission(); if(p==="granted"){ toast("Notifications on"); runNotify(true);} }catch(e){} openReminders(); };
 }
 
@@ -1197,7 +1234,9 @@ function openMenu(){
 
     <label class="fl">Power-ups</label>
     <button class="btn ghost" id="mList">List / reconnect view</button>
+    <button class="btn ghost" id="mBday">Birthday wheel</button>
     <button class="btn ghost" id="mDedupe">Remove duplicates</button>
+    <button class="btn ghost" id="mArrange">Auto-arrange (release pins)</button>
     <button class="btn ghost" id="mICS">Add reminders to calendar (.ics)</button>
     <button class="btn ghost" id="mVCF">Import phone contacts (.vcf)</button>
     <input type="file" id="mVcfFile" accept=".vcf,text/vcard" class="hidden"/>
@@ -1224,12 +1263,14 @@ function openMenu(){
   document.getElementById("mFile").onchange=importFile;
   document.getElementById("mList").onclick=()=>{ closeSheet(); toggleList(true); };
   { const x=document.getElementById("mDedupe"); if(x) x.onclick=()=>{ const n=dedupe(); save(); kick(0.5); refreshChrome(); if(listOpen) renderList(); toast(n?("Merged "+n+" duplicate"+(n===1?"":"s")):"No duplicates found"); }; }
+  { const x=document.getElementById("mBday"); if(x) x.onclick=()=>{ closeSheet(); openBirthdayWheel(); }; }
+  { const x=document.getElementById("mArrange"); if(x) x.onclick=()=>{ let c=0; state.nodes.forEach(n=>{ if(n.pinned){ n.pinned=false; c++; } }); save(); kick(1); closeSheet(); toast(c?("Released "+c+" pinned"):"Nothing was pinned"); }; }
   document.getElementById("mICS").onclick=exportICS;
   document.getElementById("mVCF").onclick=()=>document.getElementById("mVcfFile").click();
   document.getElementById("mVcfFile").onchange=importVCF;
   document.getElementById("mAI").onclick=openAISetup;
   { const x=document.getElementById("mCloud"); if(x) x.onclick=openCloudSetup; }
-  { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); await syncNow(false); }; }
+  { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); await syncNow(false,true); }; }
   { const x=document.getElementById("mPull"); if(x) x.onclick=async()=>{ toast("Refreshing…"); let c=gistCfg(); if(c&&!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } } const r=await gistPull(); if(r.ok&&r.data){ const a=mergeCloudNodes(normNodes(r.data)); if(a){ save(); kick(0.8); refreshChrome(); } toast(a?("Pulled · "+a+" new"):"Up to date"); } else toast("Pull failed: "+(r.err||"")); }; }
   { const x=document.getElementById("mDisc"); if(x) x.onclick=()=>{ setGistCfg(null); toast("Cloud disconnected"); openMenu(); }; }
   document.getElementById("mFit").onclick=()=>{ closeSheet(); fitAll(); };
@@ -1439,6 +1480,60 @@ function renderList(){
 }
 
 /* ============================================================
+   BIRTHDAY WHEEL (year circle)
+============================================================ */
+function closeBirthdayWheel(){ document.getElementById("bwheel").classList.add("hidden"); }
+function openBirthdayWheel(){
+  const wrap=document.getElementById("bwheel"); wrap.classList.remove("hidden");
+  const CUM=[0,31,59,90,120,151,181,212,243,273,304,334];
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const cx=180,cy=180,R=140;
+  const doy=(m,d)=>CUM[m-1]+d;
+  const ang=f=> -Math.PI/2 + f*Math.PI*2;
+  const pt=(f,r)=>[cx+Math.cos(ang(f))*r, cy+Math.sin(ang(f))*r];
+  const people=state.nodes.filter(n=>n.type==="person" && n.birthday && parseYMD(n.birthday));
+
+  let svg=`<svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">`;
+  svg+=`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>`;
+  svg+=`<circle cx="${cx}" cy="${cy}" r="${R-52}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+  for(let m=0;m<12;m++){
+    const f=CUM[m]/365; const a=pt(f,R-6), b=pt(f,R+6);
+    svg+=`<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>`;
+    const l=pt((CUM[m]+15)/365, R+22);
+    svg+=`<text x="${l[0].toFixed(1)}" y="${l[1].toFixed(1)}" fill="rgba(255,255,255,0.5)" font-size="11" text-anchor="middle" dominant-baseline="middle">${MON[m]}</text>`;
+  }
+  // today needle
+  const now=new Date(); const tf=doy(now.getMonth()+1, now.getDate())/365; const tp=pt(tf,R);
+  svg+=`<line x1="${cx}" y1="${cy}" x2="${tp[0].toFixed(1)}" y2="${tp[1].toFixed(1)}" stroke="#FFD60A" stroke-width="2"/>`;
+  svg+=`<circle cx="${cx}" cy="${cy}" r="4" fill="#FFD60A"/>`;
+  const tl=pt(tf,R-30); svg+=`<text x="${tl[0].toFixed(1)}" y="${tl[1].toFixed(1)}" fill="#FFD60A" font-size="9" text-anchor="middle">today</text>`;
+  // birthday dots (stack same-day inward)
+  const byDay={};
+  people.forEach(p=>{ const b=parseYMD(p.birthday); (byDay[b.m+"-"+b.d]||(byDay[b.m+"-"+b.d]=[])).push(p); });
+  Object.keys(byDay).forEach(key=>{
+    const arr=byDay[key]; const b=parseYMD(arr[0].birthday); const f=doy(b.m,b.d)/365;
+    arr.forEach((p,i)=>{ const rr=Math.max(R-i*13, R-52); const c=pt(f,rr); const col=nodeColor(p);
+      svg+=`<circle class="bwdot" data-id="${p.id}" cx="${c[0].toFixed(1)}" cy="${c[1].toFixed(1)}" r="6.5" fill="${col}" stroke="rgba(0,0,0,0.55)" stroke-width="1"><title>${esc(p.name)} · ${MON[b.m-1]} ${b.d}</title></circle>`;
+    });
+  });
+  svg+=`</svg>`;
+  document.getElementById("bwWrap").innerHTML=svg;
+
+  const up=people.map(p=>({p,du:daysUntilBirthday(p.birthday)})).filter(x=>x.du!=null).sort((a,b)=>a.du-b.du);
+  let info=`<div style="font-size:13px;color:var(--txt2);padding:6px 2px 10px">${people.length} ${people.length===1?"birthday":"birthdays"}${up.length?` · next: ${esc(firstName(up[0].p.name))} in ${up[0].du}d`:""}</div>`;
+  info+=up.slice(0,8).map(x=>{ const b=parseYMD(x.p.birthday); const col=nodeColor(x.p);
+    return `<div class="bw-row" data-id="${x.p.id}"><div class="dot" style="background:${hexA(col,0.22)};color:${col}">${x.p.emoji||initials(x.p.name)}</div>
+      <div style="flex:1"><div style="font-size:15px;font-weight:600">${esc(x.p.name)}</div>
+      <div style="font-size:12px;color:var(--txt2)">${MON[b.m-1]} ${b.d} · ${x.du===0?"today 🎂":"in "+x.du+"d"}</div></div><div class="go" style="color:var(--txt3)">&#8250;</div></div>`;
+  }).join("") || `<div style="text-align:center;color:var(--txt2);padding:24px">No birthdays yet — add them on people to see them here.</div>`;
+  document.getElementById("bwInfo").innerHTML=info;
+
+  const jump=id=>{ const n=byId(id); if(n){ closeBirthdayWheel(); focusNode(n); setTimeout(()=>openDetail(n),560); } };
+  wrap.querySelectorAll(".bwdot").forEach(el=>el.addEventListener("click",()=>jump(el.getAttribute("data-id"))));
+  wrap.querySelectorAll(".bw-row").forEach(el=>el.onclick=()=>jump(el.getAttribute("data-id")));
+}
+
+/* ============================================================
    CALENDAR EXPORT (.ics)
 ============================================================ */
 function pad2(x){ return String(x).padStart(2,"0"); }
@@ -1479,13 +1574,13 @@ function exportICS(){
    CLOUD SYNC (private GitHub Gist)
 ============================================================ */
 const GIST_KEY="orbit.gist";
-let syncTimer=null;
+let syncTimer=null, cloudDirty=false;
 function gistCfg(){ try{ return JSON.parse(localStorage.getItem(GIST_KEY)||"null"); }catch(e){ return null; } }
 function setGistCfg(c){ try{ if(!c) localStorage.removeItem(GIST_KEY); else localStorage.setItem(GIST_KEY,JSON.stringify(c)); }catch(e){} }
 function syncSoon(){
   const c=gistCfg(); if(!c||!c.token) return;
   clearTimeout(syncTimer);
-  syncTimer=setTimeout(()=>{ syncNow(true).catch(()=>{}); }, 3500);
+  syncTimer=setTimeout(()=>{ syncNow(true,true).catch(()=>{}); }, 3500);
 }
 async function gistPush(){
   const c=gistCfg(); if(!c||!c.token) return {ok:false,err:"no token"};
@@ -1531,7 +1626,7 @@ function mergeCloudNodes(incoming){
   return added;
 }
 // two-way: pull + merge + push, so adding on any device shows up everywhere
-async function syncNow(silent){
+async function syncNow(silent, force){
   const c0=gistCfg(); if(!c0||!c0.token){ if(!silent) toast("Set up cloud sync first"); return false; }
   try{
     let c=gistCfg();
@@ -1541,11 +1636,16 @@ async function syncNow(silent){
       if(r.data.tombstones){ if(!state.tombstones) state.tombstones={}; for(const k in r.data.tombstones){ state.tombstones[k]=Math.max(state.tombstones[k]||0, r.data.tombstones[k]); } }
       added=mergeCloudNodes(normNodes(r.data));
     } }
-    if(added){ save(); kick(0.8); refreshChrome(); if(listOpen) renderList(); }
-    const p=await gistPush();
-    try{ localStorage.setItem("orbit.lastlocal",String(Date.now())); }catch(e){}
-    if(!silent) toast(p.ok ? (added? ("Synced · "+added+" new from your other device") : "Synced — everything's up to date") : "Sync failed: "+(p.err||"check token"));
-    return p.ok;
+    if(added){ cloudDirty=true; kick(0.8); refreshChrome(); if(listOpen) renderList(); }
+    let pushed=true;
+    if(force || cloudDirty || added>0 || !gistCfg().id){
+      const p=await gistPush(); pushed=p.ok;
+      if(p.ok){ cloudDirty=false; try{ localStorage.setItem("orbit.lastlocal",String(Date.now())); }catch(e){} }
+      if(!silent) toast(pushed ? (added? ("Synced · "+added+" new from your other device") : "Synced") : "Sync failed: "+(p.err||"check token"));
+    } else if(!silent){
+      toast(added? ("Synced · "+added+" new") : "Up to date");
+    }
+    return pushed;
   }catch(e){ if(!silent) toast("Sync error — use a classic token with the gist scope"); return false; }
 }
 async function cloudBootSync(){
@@ -1569,7 +1669,7 @@ function openCloudSetup(){
     const prev=gistCfg();
     setGistCfg({token:t, id:(prev&&prev.id)||null});
     toast("Connecting…");
-    const ok=await syncNow(false);   // finds/creates the shared file, then two-way syncs
+    const ok=await syncNow(false,true);   // finds/creates the shared file, then two-way syncs
     if(ok){ openMenu(); } else { setGistCfg(prev||null); }
   };
 }
@@ -1783,6 +1883,7 @@ document.getElementById("btnList").onclick=()=>toggleList();
 document.getElementById("sortUrg").onclick=()=>{ listSort="urgency"; setSeg(); renderList(); };
 document.getElementById("sortAZ").onclick=()=>{ listSort="az"; setSeg(); renderList(); };
 document.getElementById("aiPlanBtn").onclick=openOutreachPlan;
+document.getElementById("bwClose").onclick=closeBirthdayWheel;
 document.getElementById("btnFit").onclick=fitAll;
 document.getElementById("btnZoomIn").onclick=()=>zoomAt(W/2,H/2,clamp(cam.scale*1.5,0.12,5));
 document.getElementById("btnZoomOut").onclick=()=>zoomAt(W/2,H/2,clamp(cam.scale/1.5,0.12,5));
@@ -1817,7 +1918,8 @@ function boot(){
     btn.onclick=go; inp.addEventListener("keydown",e=>{ if(e.key==="Enter") go(); });
     setTimeout(()=>inp.focus(),400);
   }
-  document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ refreshChrome(); requestFrame(); } });
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ refreshChrome(); requestFrame(); if(gistCfg()&&gistCfg().token) syncNow(true); } });
+  setInterval(()=>{ if(!document.hidden && gistCfg() && gistCfg().token) syncNow(true); }, 60000);
 }
 boot();
 </script>
