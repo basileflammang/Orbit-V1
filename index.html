@@ -241,7 +241,7 @@ const FS = '-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif'
    STATE + PERSISTENCE
 ============================================================ */
 const KEY = "orbit.state.v3";
-let state = { userName:null, nodes:[], cam:null, tombstones:{} };
+let state = { userName:null, nodes:[], cam:null, tombstones:{}, filters:{}, animations:true };
 let ME = { id:"me", type:"me", name:"Me", parentId:null, x:0, y:0, vx:0, vy:0 };
 
 function load(){
@@ -258,6 +258,8 @@ function load(){
       state.nodes = Array.isArray(s.nodes) ? s.nodes : [];
       state.cam = s.cam || null;
       state.tombstones = (s.tombstones && typeof s.tombstones==="object") ? s.tombstones : {};
+      state.filters = (s.filters && typeof s.filters==="object") ? s.filters : {};
+      state.animations = s.animations!==false;
       if(s.me){ ME = Object.assign(ME, s.me); }
     }
   }catch(e){}
@@ -272,7 +274,7 @@ function save(){
         userName: state.userName, nodes: plainNodes(),
         me:{x:ME.x,y:ME.y,name:ME.name},
         cam:{x:cam.x,y:cam.y,scale:cam.scale},
-        tombstones: state.tombstones
+        tombstones: state.tombstones, filters: state.filters, animations: state.animations
       }));
       localStorage.setItem("orbit.lastlocal", String(Date.now()));
     }catch(e){}
@@ -288,6 +290,7 @@ const CAT = {
   friend:{c:"#30D158",label:"Friend"},
   family:{c:"#FF453A",label:"Family"},
   colleague:{c:"#0A84FF",label:"Colleague"},
+  special:{c:"#FF64B0",label:"Special"},
 };
 const PLACE_C = "#BF5AF2";
 const EVENT_C = "#40C8E0";
@@ -322,19 +325,26 @@ function rebuild(){
   // descendant count via DFS
   function desc(n){ let c=0; for(const k of n._kids){ c += 1 + desc(k); } n._desc=c; return c; }
   desc(ME);
-  // assign radii top-down so each node can be sized relative to its parent
-  ME._r = ME_R;
-  (function assign(n){ for(const k of n._kids){ k._r = childRadius(k, n._r); assign(k); } })(ME);
+  // radius by subtree weight: hubs scale with how many people hang off them,
+  // the core grows slowly as the network grows, and a child is always < its parent.
+  ME._r = baseR(ME);
+  (function assign(n){ for(const k of n._kids){
+    k._r = Math.max(6, Math.min(baseR(k)*sizeFactor(k), n._r*0.86));
+    assign(k);
+  } })(ME);
+  // visibility (category / type filters), inherited from ancestors
+  ME._vis = true;
+  (function vis(n){ for(const k of n._kids){ k._vis = n._vis && ownVisible(k); vis(k); } })(ME);
 }
-const ME_R = 74;                 // the nucleus / sun — always the largest
-// Biological nesting: every node is a fraction of its PARENT, so depth reads instantly.
-// Big deltas are intentional — you zoom in for detail; the whole tree needn't be legible at once.
-function childRadius(n, parentR){
-  let f = 0.58;                                          // a child starts ~58% of its parent
-  if(n.type==="person") f += (((n.closeness||5)-5)/10) * 0.18;  // closeness nudges siblings ±
-  f += Math.min(Math.sqrt(n._desc||0)/7, 0.20);          // a hub with many branches grows a bit
-  f = clamp(f, 0.40, 0.80);                              // never <40% or >80% of its parent
-  return Math.max(5, parentR * f);
+// weight = size of the whole subtree; sqrt keeps it in proportion. More attached ⇒ bigger.
+function baseR(n){ const w = 1 + (n._desc||0); return 6 + 14*Math.sqrt(w); }
+function sizeFactor(n){ return n.type==="person" ? (0.9 + clamp(n.closeness||5,1,10)/10*0.26) : 1; }
+function ownVisible(n){
+  const f=state.filters||{};
+  if(n.type==="person") return !f["cat:"+(n.category||"friend")];
+  if(n.type==="place")  return !f["type:place"];
+  if(n.type==="event")  return !f["type:event"];
+  return true;
 }
 
 /* dates */
@@ -393,19 +403,20 @@ const SIM_MIN = 0.008;
 function kick(a=0.75){ simAlpha=Math.max(simAlpha,a); ensureLoop(); }
 
 function stepSim(){
-  const all = allNodes();
-  const n = all.length;
+  const full = allNodes();
   // seed positions for freshly added nodes
-  for(const p of all){
+  for(const p of full){
     if(p.x==null||p.y==null){
       const par = byId(p.parentId) || ME;
       const ang = Math.random()*Math.PI*2;
-      p.x = (par.x||0) + Math.cos(ang)*(par._r+p._r+40);
-      p.y = (par.y||0) + Math.sin(ang)*(par._r+p._r+40);
+      p.x = (par.x||0) + Math.cos(ang)*((par._r||40)+(p._r||18)+50);
+      p.y = (par.y||0) + Math.sin(ang)*((par._r||40)+(p._r||18)+50);
       p.vx=0; p.vy=0;
     }
   }
-  // repulsion (O(n^2) — fine for personal scale)
+  const all = full.filter(p=>p._vis!==false);   // hidden (filtered) nodes don't affect layout
+  const n = all.length;
+  // repulsion scaled by node size so big hubs claim their space (de-cramps the web)
   for(let i=0;i<n;i++){
     const a=all[i];
     for(let j=i+1;j<n;j++){
@@ -413,7 +424,8 @@ function stepSim(){
       let dx=a.x-b.x, dy=a.y-b.y;
       let d2=dx*dx+dy*dy; if(d2<0.01){ dx=Math.random()-0.5; dy=Math.random()-0.5; d2=1; }
       const d=Math.sqrt(d2);
-      const rep = (2600 + (a._r+b._r)*30) / d2;
+      const sum=a._r+b._r;
+      const rep = (sum*sum*0.9 + 1400) / d2;
       const fx=(dx/d)*rep, fy=(dy/d)*rep;
       a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
     }
@@ -421,25 +433,25 @@ function stepSim(){
   // link springs (parent<->child)
   for(const c of all){
     if(c.parentId==null) continue;
-    const p=byId(c.parentId); if(!p) continue;
+    const p=byId(c.parentId); if(!p||p._vis===false) continue;
     let dx=c.x-p.x, dy=c.y-p.y; let d=Math.hypot(dx,dy)||0.01;
-    const rest = p._r + c._r + 46 + (c.type==="place"?24:0);
-    const f = (d-rest)*0.035;
+    const rest = p._r + c._r + 42;
+    const f = (d-rest)*0.04;
     const fx=(dx/d)*f, fy=(dy/d)*f;
     c.vx-=fx; c.vy-=fy; p.vx+=fx; p.vy+=fy;
   }
-  // collision (prevent overlap)
+  // collision (hard anti-overlap, padded by size)
   for(let i=0;i<n;i++){
     const a=all[i];
     for(let j=i+1;j<n;j++){
       const b=all[j];
       const dx=a.x-b.x, dy=a.y-b.y; const d=Math.hypot(dx,dy)||0.01;
-      const min=a._r+b._r+10;
+      const min=a._r+b._r+14;
       if(d<min){ const push=(min-d)*0.5; const fx=(dx/d)*push, fy=(dy/d)*push; a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy; }
     }
   }
   // gentle centering
-  for(const p of all){ p.vx += (0-p.x)*0.0016; p.vy += (0-p.y)*0.0016; }
+  for(const p of all){ p.vx += (0-p.x)*0.0015; p.vy += (0-p.y)*0.0015; }
   // integrate
   for(const p of all){
     if(p===ME){ p.x=0; p.y=0; p.vx=0; p.vy=0; continue; }
@@ -457,13 +469,22 @@ function stepSim(){
 let rafId=null, interacting=false, selectedId=null, focusPulse=0;
 function ensureLoop(){ if(rafId==null) rafId=requestAnimationFrame(frame); }
 function requestFrame(){ ensureLoop(); }
+let animTime=0;
+function animOff(n){
+  if(!state.animations || n.type==="me" || n._drag || n.pinned) return NO_OFF;
+  if(n._phase==null){ let h=0; const s=String(n.id); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; n._phase=(h%628)/100; }
+  const t=animTime*0.0011;
+  return [Math.sin(t+n._phase)*1.6, Math.cos(t*0.9+n._phase)*1.6];
+}
+const NO_OFF=[0,0];
 function frame(){
   rafId=null;
+  animTime=performance.now();
   let active=false;
   if(simAlpha>SIM_MIN){ stepSim(); simAlpha*=0.985; active=true; }
   if(focusPulse>0){ focusPulse-=0.04; active=true; }
   render();
-  if(active||interacting) ensureLoop();
+  if(active||interacting||state.animations) ensureLoop();
 }
 
 function render(){
@@ -477,8 +498,8 @@ function render(){
   // ---- links ----
   ctx.lineWidth = Math.max(0.6, 1*cam.scale);
   for(const c of all){
-    if(c.parentId==null) continue;
-    const p=byId(c.parentId); if(!p||p.x==null||c.x==null) continue;
+    if(c.parentId==null || c._vis===false) continue;
+    const p=byId(c.parentId); if(!p||p.x==null||c.x==null||p._vis===false) continue;
     const col = nodeColor(c.type==="place"?c:p);
     ctx.strokeStyle = hexA(nodeColor(c), 0.22);
     ctx.beginPath();
@@ -490,15 +511,15 @@ function render(){
   ctx.setLineDash([2,5]);
   ctx.strokeStyle="rgba(255,255,255,0.20)";
   for(const c of state.nodes){
-    if(!c.introducedById) continue;
-    const p=byId(c.introducedById); if(!p||p.x==null) continue;
+    if(!c.introducedById || c._vis===false) continue;
+    const p=byId(c.introducedById); if(!p||p.x==null||p._vis===false) continue;
     ctx.beginPath(); ctx.moveTo(toScreenX(p.x),toScreenY(p.y)); ctx.lineTo(toScreenX(c.x),toScreenY(c.y)); ctx.stroke();
   }
   ctx.setLineDash([]);
 
   // ---- nodes ----
   for(const nnode of all){
-    if(nnode.x==null) continue;
+    if(nnode.x==null || nnode._vis===false) continue;
     drawNode(nnode);
   }
 }
@@ -507,7 +528,8 @@ function hexA(hex,a){
   return `rgba(${r},${g},${b},${a})`;
 }
 function drawNode(n){
-  const sx=toScreenX(n.x), sy=toScreenY(n.y), r=n._r*cam.scale;
+  const off=animOff(n);
+  const sx=toScreenX(n.x+off[0]), sy=toScreenY(n.y+off[1]), r=n._r*cam.scale;
   if(sx< -r-60||sx>W+r+60||sy<-r-60||sy>H+r+60) return; // cull
   const col = nodeColor(n);
   const isMe = n.type==="me", isContainer = isContainerType(n.type);
@@ -612,12 +634,19 @@ function processImage(file, cb){
 function wirePhoto(get,set){
   const pf=document.getElementById("photoFile"), pb=document.getElementById("photoBtn"), pv=document.getElementById("photoPrev");
   if(!pf||!pb||!pv) return;
-  pb.onclick=()=>pf.click();
-  pf.onchange=e=>processImage(e.target.files&&e.target.files[0], durl=>{
+  const onFile=(file)=>processImage(file, durl=>{
     if(!durl){ toast("Couldn't read that image"); return; }
     set(durl); pv.style.backgroundImage="url('"+durl+"')"; pb.textContent="Change photo"; haptic();
   });
+  pb.onclick=()=>pf.click();
+  pf.onchange=e=>onFile(e.target.files&&e.target.files[0]);
   pv.onclick=()=>{ if(get()){ set(""); pv.style.backgroundImage=""; pb.textContent="Choose photo"; toast("Photo removed"); } };
+  // desktop: drag an image file straight onto the preview/button
+  [pv,pb].forEach(el=>{
+    el.addEventListener("dragover",e=>{ e.preventDefault(); el.style.outline="2px dashed rgba(120,175,255,0.8)"; el.style.outlineOffset="2px"; });
+    el.addEventListener("dragleave",()=>{ el.style.outline=""; });
+    el.addEventListener("drop",e=>{ e.preventDefault(); el.style.outline=""; const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f&&/^image\//.test(f.type||"")) onFile(f); else toast("Drop an image file"); });
+  });
 }
 function initials(name){ const p=(name||"").trim().split(/\s+/); return ((p[0]?.[0]||"")+(p[1]?.[0]||"")).toUpperCase()||"?"; }
 function firstName(name){ return (name||"").trim().split(/\s+/)[0]||""; }
@@ -628,9 +657,9 @@ function firstName(name){ return (name||"").trim().split(/\s+/)[0]||""; }
 function nodeAt(sx,sy){
   const all=allNodes();
   for(let i=all.length-1;i>=0;i--){
-    const n=all[i]; if(n.x==null) continue;
+    const n=all[i]; if(n.x==null || n._vis===false) continue;
     const dx=sx-toScreenX(n.x), dy=sy-toScreenY(n.y);
-    if(dx*dx+dy*dy <= Math.pow(n._r*cam.scale+8,2)) return n;
+    if(dx*dx+dy*dy <= Math.pow(n._r*cam.scale+10,2)) return n;
   }
   return null;
 }
@@ -688,7 +717,7 @@ function onMove(e){
       let wx=toWorldX(e.clientX), wy=toWorldY(e.clientY);
       let ddx=wx-(par.x||0), ddy=wy-(par.y||0); let dd=Math.hypot(ddx,ddy)||0.01;
       const rest=(par._r||40)+(nd._r||18)+46;
-      const cl=clamp(dd, rest*0.55, rest*2.6);
+      const cl=clamp(dd, rest*0.4, rest*5.0);   // lots of room to arrange
       nd.x=(par.x||0)+ddx/dd*cl; nd.y=(par.y||0)+ddy/dd*cl;
       nd.vx=0; nd.vy=0; requestFrame();
     }
@@ -710,8 +739,9 @@ function onUp(e){
   delete _prev[e.pointerId];
   if(gesture && rec){
     const isTap = !gesture.moved && (Date.now()-gesture.t)<TAP_TIME;
-    if(isTap && (gesture.mode==="node")){ openDetail(gesture.node); }
-    else if(isTap && gesture.mode==="maybeMe"){ openMeSheet(); }
+    if(isTap && gesture.mode==="node"){ handleNodeTap(gesture.node); }
+    else if(isTap && gesture.mode==="maybeMe"){ if(selectedId==="me"){ openMeSheet(); } else { selectedId="me"; requestFrame(); } }
+    else if(isTap && gesture.mode==="pan"){ if(selectedId){ selectedId=null; requestFrame(); } }  // tap empty space = deselect
     if(gesture.mode==="node" && gesture.node){ gesture.node._drag=false; if(gesture.moved){ gesture.node.pinned=true; toast("Pinned here"); } kick(0.2); save(); }
   }
   ptrs.delete(e.pointerId);
@@ -722,6 +752,21 @@ function onUp(e){
   }
 }
 function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+let lastNodeTap={id:null,t:0};
+function handleNodeTap(n){
+  const now=Date.now();
+  if(lastNodeTap.id===n.id && now-lastNodeTap.t<300){
+    // fast double-tap → lock / release position
+    n.pinned=!n.pinned; if(!n.pinned) kick(0.6); save(); refreshChrome&&refreshChrome();
+    toast(n.pinned?"Locked in place":"Released"); haptic(18);
+    lastNodeTap={id:null,t:0};
+    requestFrame();
+    return;
+  }
+  lastNodeTap={id:n.id,t:now};
+  if(selectedId===n.id){ openDetail(n); }        // second (deliberate) tap opens the profile
+  else { selectedId=n.id; haptic(8); requestFrame(); }   // first tap just selects
+}
 
 canvas.addEventListener("pointerdown",onDown);
 canvas.addEventListener("pointermove",e=>{ // init prev on first move
@@ -757,7 +802,7 @@ function focusNode(n){
   animateCam(n.x, n.y, ns); selectedId=n.id; focusPulse=1; ensureLoop();
 }
 function fitAll(){
-  const all=allNodes().filter(n=>n.x!=null);
+  const all=allNodes().filter(n=>n.x!=null && n._vis!==false);
   if(all.length<=1){ animateCam(0,0,1); return; }
   let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
   for(const n of all){ minX=Math.min(minX,n.x-n._r);maxX=Math.max(maxX,n.x+n._r);minY=Math.min(minY,n.y-n._r);maxY=Math.max(maxY,n.y+n._r); }
@@ -994,11 +1039,6 @@ function openPersonForm(node, parentId){
     <div class="sh-title">${isEdit?"Edit person":"Add person"}</div>
     <label class="fl">Name</label>
     <input id="fName" value="${esc(d.name||"")}" placeholder="Who are they?" autocomplete="off"/>
-    <button type="button" class="btn ghost" id="bioToggle" style="margin-top:6px">✨ Autofill from a pasted bio</button>
-    <div id="bioWrap" class="hidden">
-      <textarea id="bioText" placeholder="Paste a bio / LinkedIn text and I'll fill the fields…" style="min-height:84px;margin-top:8px"></textarea>
-      <button type="button" class="btn primary" id="bioGo">✨ Autofill from bio</button>
-    </div>
 
     <label class="fl">Relationship</label>
     <div class="chips" id="catChips">
@@ -1031,7 +1071,7 @@ function openPersonForm(node, parentId){
     <label class="fl">Photo (optional)</label>
     <div class="row" style="gap:12px;align-items:center">
       <div id="photoPrev" class="photoPrev" style="${d.photo?`background-image:url('${d.photo}')`:""}"></div>
-      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo"}</button>
+      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo (or drag one in)"}</button>
     </div>
     <input type="file" id="photoFile" accept="image/*" class="hidden"/>
 
@@ -1053,8 +1093,6 @@ function openPersonForm(node, parentId){
     c.classList.add("on"); c.style.background="rgba(255,255,255,0.16)"; haptic();
   });
   document.getElementById("fClose").oninput=e=>document.getElementById("clsV").textContent=e.target.value;
-  const bt=document.getElementById("bioToggle"); if(bt) bt.onclick=()=>{ if(!aiReady()){ openAISetup(); return; } document.getElementById("bioWrap").classList.toggle("hidden"); };
-  const bg=document.getElementById("bioGo"); if(bg) bg.onclick=bioFill;
 
   document.getElementById("fSave").onclick=()=>{
     const name=document.getElementById("fName").value.trim();
@@ -1108,7 +1146,7 @@ function openPlaceForm(node, parentId, type){
     <label class="fl">Photo (optional)</label>
     <div class="row" style="gap:12px;align-items:center">
       <div id="photoPrev" class="photoPrev" style="${d.photo?`background-image:url('${d.photo}')`:""}"></div>
-      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo"}</button>
+      <button type="button" class="btn ghost" id="photoBtn" style="margin:0;flex:1">${d.photo?"Change photo":"Choose photo (or drag one in)"}</button>
     </div>
     <input type="file" id="photoFile" accept="image/*" class="hidden"/>
 
@@ -1245,8 +1283,16 @@ function openMenu(){
       ? `<button class="btn primary" id="mSyncNow">Sync now (two-way)</button><button class="btn ghost" id="mPull">Force pull from cloud</button><button class="btn ghost" id="mDisc">Disconnect cloud</button>`
       : `<button class="btn ghost" id="mCloud">Set up free cloud sync</button>`}
 
+    <label class="fl">Show / hide</label>
+    <div class="chips" id="filtChips">
+      ${Object.keys(CAT).map(k=>`<div class="chip filt ${state.filters["cat:"+k]?'':'on'}" data-key="cat:${k}" data-color="${CAT[k].c}" style="${state.filters["cat:"+k]?'':'background:'+CAT[k].c+';border-color:'+CAT[k].c+';color:#fff'}">${CAT[k].label}</div>`).join("")}
+      <div class="chip filt ${state.filters["type:place"]?'':'on'}" data-key="type:place" data-color="${PLACE_C}" style="${state.filters["type:place"]?'':'background:'+PLACE_C+';border-color:'+PLACE_C+';color:#fff'}">Places</div>
+      <div class="chip filt ${state.filters["type:event"]?'':'on'}" data-key="type:event" data-color="${EVENT_C}" style="${state.filters["type:event"]?'':'background:'+EVENT_C+';border-color:'+EVENT_C+';color:#fff'}">Events</div>
+    </div>
+
     <label class="fl">General</label>
     <button class="btn ghost" id="mFit">Fit whole network on screen</button>
+    <button class="btn ghost" id="mMotion">Subtle motion: ${state.animations?"on":"off"}</button>
     <button class="btn ghost" id="mName">Rename myself</button>
     <button class="btn danger" id="mReset">Erase everything</button>
 
@@ -1273,6 +1319,15 @@ function openMenu(){
   { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); await syncNow(false,true); }; }
   { const x=document.getElementById("mPull"); if(x) x.onclick=async()=>{ toast("Refreshing…"); let c=gistCfg(); if(c&&!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } } const r=await gistPull(); if(r.ok&&r.data){ const a=mergeCloudNodes(normNodes(r.data)); if(a){ save(); kick(0.8); refreshChrome(); } toast(a?("Pulled · "+a+" new"):"Up to date"); } else toast("Pull failed: "+(r.err||"")); }; }
   { const x=document.getElementById("mDisc"); if(x) x.onclick=()=>{ setGistCfg(null); toast("Cloud disconnected"); openMenu(); }; }
+  sheet.querySelectorAll(".filt").forEach(c=>c.onclick=()=>{
+    const k=c.dataset.key;
+    if(state.filters[k]){ delete state.filters[k]; } else { state.filters[k]=true; }
+    const show=!state.filters[k];
+    c.classList.toggle("on",show);
+    c.style.background=show?c.dataset.color:""; c.style.borderColor=show?c.dataset.color:""; c.style.color=show?"#fff":"";
+    save(); rebuild(); kick(0.5); refreshChrome(); if(listOpen) renderList(); requestFrame(); haptic();
+  });
+  { const x=document.getElementById("mMotion"); if(x) x.onclick=()=>{ state.animations=!state.animations; save(); x.textContent="Subtle motion: "+(state.animations?"on":"off"); if(state.animations) ensureLoop(); else requestFrame(); }; }
   document.getElementById("mFit").onclick=()=>{ closeSheet(); fitAll(); };
   document.getElementById("mName").onclick=openMeSheet;
   document.getElementById("mReset").onclick=confirmErase;
