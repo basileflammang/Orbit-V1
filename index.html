@@ -272,6 +272,7 @@ function save(){
   cloudDirty=true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
+    captureFreeLayout();   // keep the hand-organised layout up to date (skipped in world-map mode)
     try{
       localStorage.setItem(KEY, JSON.stringify({
         userName: state.userName, nodes: plainNodes(),
@@ -390,7 +391,54 @@ function rebuild(){
   });
   // relationship freshness 0..1 (1 = fresh) for decay visuals
   allNodes().forEach(n=>{ n._fresh = freshness(n); });
+  // nearest geographic anchor (self or closest ancestor with known coords)
+  (function anchor(n, a){
+    const self = isContainerType(n.type) && geoOf(n) ? n : null;
+    const cur = self || a;
+    n._anchorId = cur ? cur.id : null;
+    for(const k of n._kids) anchor(k, cur);
+  })(ME, null);
   recomputeAmbiguous();
+}
+/* ---- world-map mode: move everyone, not just the pins ---- */
+function geoTarget(n){ const g=geoOf(n); return g? [g[0]*GEO_SCALE, -g[1]*GEO_SCALE*1.25] : null; }
+// remember the hand-organised layout in PERSISTED fields (fx/fy) so it survives
+// reloads, backups and sync — geo positions are treated as throw-away
+function captureFreeLayout(force){
+  if(state.geo && !force) return;   // never let geo positions overwrite your layout
+  state.nodes.forEach(n=>{ if(n.x!=null&&n.y!=null){ n.fx=n.x; n.fy=n.y; } });
+}
+function restoreFreeLayout(){
+  state.nodes.forEach(n=>{
+    if(n.fx!=null&&n.fy!=null){ n.x=n.fx; n.y=n.fy; }
+    else { n.x=null; n.y=null; }   // never organised → re-seed near its parent
+    n.vx=0; n.vy=0;
+  });
+}
+function enterGeo(){
+  captureFreeLayout(true);   // x/y are still the free-form layout at this moment — bank it
+  rebuild();
+  const all=allNodes();
+  // 1. pin the known places to their true positions
+  all.forEach(n=>{ const t=isContainerType(n.type)?geoTarget(n):null; if(t){ n.x=t[0]; n.y=t[1]; n.vx=0; n.vy=0; } });
+  // 2. put yourself in the middle of your world
+  const anchored=all.filter(n=>isContainerType(n.type)&&geoOf(n));
+  if(anchored.length){ ME.x=anchored.reduce((s,n)=>s+n.x,0)/anchored.length; ME.y=anchored.reduce((s,n)=>s+n.y,0)/anchored.length; }
+  // 3. teleport everyone else into orbit around their city (golden-angle spread)
+  let i=0;
+  all.forEach(n=>{
+    if(n===ME) return;
+    if(isContainerType(n.type) && geoOf(n)) return;
+    const a=n._anchorId? byId(n._anchorId):null;
+    const bx=a?a.x:ME.x, by=a?a.y:ME.y, br=(a?a._r:ME._r)||50;
+    const ang=(i*2.39996), rad=br+55+(n._r||18)+((i%6)*14);
+    i++;
+    n.x=bx+Math.cos(ang)*rad; n.y=by+Math.sin(ang)*rad; n.vx=0; n.vy=0;
+  });
+}
+function exitGeo(){
+  ME.x=0; ME.y=0; ME.vx=0; ME.vy=0;
+  restoreFreeLayout();
 }
 // 1 = recently in touch, 0 = long gone. Uses cadence when set, else a 180-day yardstick.
 function freshness(n){
@@ -517,6 +565,13 @@ function stepSim(){
   if(!state.geo){
     // gentle centering (free-form mode)
     for(const p of all){ p.vx += (0-p.x)*0.0015; p.vy += (0-p.y)*0.0015; }
+  } else {
+    // world map: hold people in the neighbourhood of their own city
+    for(const p of all){
+      if(p===ME || (isContainerType(p.type)&&geoOf(p))) continue;
+      const a=p._anchorId? byId(p._anchorId):null; if(!a||a.x==null) continue;
+      p.vx += (a.x-p.x)*0.03; p.vy += (a.y-p.y)*0.03;
+    }
   }
   // integrate
   for(const p of all){
@@ -533,9 +588,16 @@ function stepSim(){
     // geographic mode: anchored places are positioned absolutely, so real-world
     // distances can't be overpowered by the parent springs
     if(state.geo && isContainerType(p.type)){
-      const g=geoOf(p);
-      if(g){ const tx=g[0]*GEO_SCALE, ty=-g[1]*GEO_SCALE*1.25;
-        p.x += (tx-p.x)*0.12; p.y += (ty-p.y)*0.12; p.vx=0; p.vy=0; continue; }
+      const t=geoTarget(p);
+      if(t){
+        // let neighbours nudge it apart (so nearby cities don't stack) but stay near the truth
+        p.vx*=0.82; p.vy*=0.82;
+        p.x += p.vx*simAlpha*1.4; p.y += p.vy*simAlpha*1.4;
+        p.x += (t[0]-p.x)*0.10; p.y += (t[1]-p.y)*0.10;
+        const dx=p.x-t[0], dy=p.y-t[1], d=Math.hypot(dx,dy), MAXD=190;
+        if(d>MAXD){ p.x=t[0]+dx/d*MAXD; p.y=t[1]+dy/d*MAXD; }
+        continue;
+      }
     }
     if(p.pinned && !state.geo){ p.vx=0; p.vy=0; continue; }   // stays where you placed it
     p.vx*=0.82; p.vy*=0.82;
@@ -576,6 +638,7 @@ function render(){
   ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
 
   const all = allNodes();
+  labelBoxes.length=0;
   if(state.geo) drawGraticule();
   // ---- cluster membranes (soft territory behind each top-level branch) ----
   if(state.hulls) drawHulls(all);
@@ -604,11 +667,9 @@ function render(){
   }
   ctx.setLineDash([]);
 
-  // ---- nodes ----
-  for(const nnode of all){
-    if(nnode.x==null || nnode._vis===false) continue;
-    drawNode(nnode);
-  }
+  // ---- nodes (largest first, so big hubs win the label space) ----
+  const drawList=all.filter(n=>n.x!=null && n._vis!==false).sort((a,b)=>(b._r||0)-(a._r||0));
+  for(const nnode of drawList) drawNode(nnode);
 }
 function hexA(hex,a){
   const h=hex.replace("#",""); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
@@ -775,7 +836,8 @@ function drawNode(n){
   /* ---- LOD: how much text to reveal, based on on-screen size ---- */
   const showName   = r>11 || isContainer || isMe;
   const showDetail = r>34 && !isMe;             // zoomed in enough for a mini card
-  if(showName){
+  const labelRoom = labelFits(sx, sy+r+5, n, isMe||isContainer);
+  if(showName && (labelRoom || isMe || n.id===selectedId)){
     const label = (isContainer||isMe) ? n.name : displayName(n);
     ctx.font=`${isContainer?"700":"600"} ${clamp(Math.round(11*Math.min(cam.scale,1.35)),10,16)}px ${FS}`;
     ctx.textAlign="center"; ctx.textBaseline="top";
@@ -796,6 +858,16 @@ function drawNode(n){
     }
   }
   ctx.restore();
+}
+/* label de-collision: skip a label if it would sit on one already drawn.
+   Bigger bubbles draw first (they win), so at world zoom cities stay readable. */
+const labelBoxes=[];
+function labelFits(cx,cy,n,important){
+  const w=Math.max(34,(n.name||"").length*5.4+8), h=13;
+  const x0=cx-w/2, y0=cy, x1=cx+w/2, y1=cy+h;
+  for(const b of labelBoxes){ if(x0<b[2]&&x1>b[0]&&y0<b[3]&&y1>b[1]) return false; }
+  labelBoxes.push([x0,y0,x1,y1]);
+  return true;
 }
 /* first name, plus a surname initial when two people share a first name */
 function displayName(n){
@@ -1573,8 +1645,9 @@ function openMenu(){
     const on = v==="colorMode" ? state.colorMode==="cluster" : !!state[v];
     c.classList.toggle("on",on);
     c.style.background=on?"rgba(255,255,255,0.16)":""; c.style.color=on?"#fff":"";
-    save(); rebuild(); kick(v==="geo"?1:0.3); requestFrame();
-    if(v==="geo"){ closeSheet(); setTimeout(fitAll,700); toast(state.geo?"World map on":"Free-form layout"); }
+    if(v==="geo"){ if(state.geo) enterGeo(); else exitGeo(); }
+    save(); rebuild(); kick(v==="geo"?0.9:0.3); requestFrame();
+    if(v==="geo"){ closeSheet(); setTimeout(fitAll,420); toast(state.geo?"World map on":"Free-form layout"); }
     haptic();
   });
   sheet.querySelectorAll(".filt").forEach(c=>c.onclick=()=>{
@@ -1648,7 +1721,8 @@ function applyBackup(s,mode){
   if(!incoming){ toast("No people found in that backup"); return; }
   try{ localStorage.setItem("orbit.state.autobackup",backupJSON()); }catch(e){} // safety snapshot
   if(mode==="replace"){
-    state.nodes=incoming.map(n=>Object.assign({},n,{x:null,y:null}));
+    // keep any saved hand-organised position (fx/fy) so restoring a backup keeps your layout
+    state.nodes=incoming.map(n=>Object.assign({},n,{x:(n.fx!=null?n.fx:null),y:(n.fy!=null?n.fy:null)}));
     if(s&&s.userName){ state.userName=s.userName; ME.name=s.userName; }
     if(s&&s.me&&s.me.name){ ME.name=s.me.name; state.userName=ME.name; }
   }else{
