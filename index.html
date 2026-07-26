@@ -68,7 +68,7 @@
   .sheet{position:fixed;left:0;right:0;bottom:0;z-index:50;margin:0 auto;max-width:500px;
     background:var(--panel);border-top-left-radius:26px;border-top-right-radius:26px;
     border:0.5px solid var(--line);box-shadow:0 -12px 50px rgba(0,0,0,0.6);
-    padding:10px 20px calc(var(--safe-b) + 22px);max-height:90vh;overflow-y:auto;
+    padding:10px 20px calc(var(--safe-b) + 40px);max-height:88vh;overflow-y:auto;overscroll-behavior:contain;
     transform:translateY(110%);transition:transform .38s cubic-bezier(.22,1,.36,1);-webkit-overflow-scrolling:touch;}
   .sheet.on{transform:translateY(0);}
   .sheet-top{position:sticky;top:0;z-index:5;background:var(--panel);margin:0 -20px 6px;padding:10px 20px 8px;display:flex;align-items:center;justify-content:center;}
@@ -96,6 +96,10 @@
     background:rgba(255,255,255,0.06);border:0.5px solid var(--line2);color:var(--txt2);transition:transform .12s;white-space:nowrap;}
   .chip:active{transform:scale(.96);}
   .chip.on{color:#fff;}
+  .chip.act{color:#fff;font-weight:600;}
+  .chip.sel{background:rgba(255,255,255,0.16);color:#fff;}
+  body.sparkle .chip.sel{background:linear-gradient(135deg,#FF7EB3,#FF4D9D);border-color:#FF4D9D;color:#fff;}
+  body.sparkle .chip.act{color:#A8446E;}
 
   .btn{width:100%;padding:14px;border:none;border-radius:14px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;
     transition:transform .14s;margin-top:10px;}
@@ -213,25 +217,29 @@
     font-size:30px;color:#B03A6E;
   }
   body.sparkle input,body.sparkle select,body.sparkle textarea{
-    background:#FFF7FB;border:1px solid var(--line2);color:var(--txt);
+    background-color:#FFF7FB;border:1px solid var(--line2);color:var(--txt);
   }
+  body.sparkle input,body.sparkle textarea{background-image:none;}
   body.sparkle input::placeholder,body.sparkle textarea::placeholder{color:var(--txt3);}
   body.sparkle input[type="date"]{color-scheme:light;}
-  body.sparkle select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%23B03A6E' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");}
+  body.sparkle select{
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%23B03A6E' stroke-width='1.8' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 14px center;background-size:12px 8px;
+  }
   body.sparkle input[type="range"]::-webkit-slider-runnable-track{background:rgba(214,110,160,0.22);}
   body.sparkle input[type="range"]::-webkit-slider-thumb{background:#fff;box-shadow:0 2px 8px rgba(214,110,160,0.5);}
-  body.sparkle .chip{background:#FFF1F7;border:1px solid var(--line2);color:#8A5470;}
+  body.sparkle .chip{background-color:#FFF1F7;background-image:none;border:1px solid var(--line2);color:#8A5470;}
   body.sparkle .btn.primary{background:linear-gradient(135deg,#FF7EB3,#FF4D9D);color:#fff;box-shadow:0 6px 18px rgba(255,77,157,0.32);}
-  body.sparkle .btn.ghost{background:#FFF1F7;color:#8A5470;border:1px solid var(--line2);}
+  body.sparkle .btn.ghost{background-color:#FFF1F7;background-image:none;color:#8A5470;border:1px solid var(--line2);}
   body.sparkle .btn.green{background:linear-gradient(135deg,#6FE0C2,#3FC9A6);color:#06463A;}
   body.sparkle .btn.danger{color:#E23A6B;}
   body.sparkle label.fl{color:#B8779A;letter-spacing:0.10em;}
-  body.sparkle .social-in{background:#FFF7FB;border:1px solid var(--line2);}
-  body.sparkle .link-row{background:#FFF7FB;border:1px solid var(--line);color:var(--txt);}
+  body.sparkle .social-in{background-color:#FFF7FB;border:1px solid var(--line2);}
+  body.sparkle .link-row{background-color:#FFF7FB;border:1px solid var(--line);color:var(--txt);}
   body.sparkle .meter i{background:rgba(214,110,160,0.16);}
-  body.sparkle .photoPrev{background:#FFF0F6 center/cover no-repeat;border:1px solid var(--line2);}
+  body.sparkle .photoPrev{background-color:#FFF0F6;border:1px solid var(--line2);}
   body.sparkle .rem-item{border-bottom:1px solid var(--line);}
-  body.sparkle .seg{background:#FFF1F7;border:1px solid var(--line2);}
+  body.sparkle .seg{background-color:#FFF1F7;border:1px solid var(--line2);}
   body.sparkle .segbtn.on{background:#fff;color:#B03A6E;box-shadow:0 2px 8px rgba(214,110,160,0.2);}
   body.sparkle #listview,body.sparkle #bwheel{background:linear-gradient(180deg,#FFF3F9,#FFE2EF);}
   body.sparkle #toast{background:rgba(255,255,255,0.97);color:#7A3E5C;border:1px solid var(--line2);box-shadow:0 8px 26px rgba(180,90,130,0.25);}
@@ -424,7 +432,7 @@ const THEMES = {
     cat:{close:"#FF9F0A",friend:"#30D158",family:"#FF453A",colleague:"#0A84FF",special:"#FF64B0"},
     place:"#BF5AF2", event:"#40C8E0",
     nodeSat:58, nodeLit:50, contSat:62, contLit:58,
-    gloss:false, sparkles:55, bloom:false
+    gloss:false, sparkles:45, bloom:false
   },
   sparkle:{
     bg0:"#FFF0F7", bg1:"#FFC7DF",
@@ -438,7 +446,7 @@ const THEMES = {
     cat:{close:"#FF7EB3",friend:"#57D2B4",family:"#FF6F91",colleague:"#8FA9FF",special:"#FF2E93"},
     place:"#C77DFF", event:"#5EC8E8",
     nodeSat:78, nodeLit:66, contSat:72, contLit:70,
-    gloss:true, sparkles:150, bloom:true
+    gloss:true, sparkles:110, bloom:true
   }
 };
 function TH(){ return THEMES[state.theme==="sparkle"?"sparkle":"midnight"]; }
@@ -641,6 +649,7 @@ function resize(){
   canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
   canvas.style.width = W+"px"; canvas.style.height = H+"px";
   ctx.setTransform(DPR,0,0,DPR,0,0);
+  bloomCache=null; sparkleField=null;
   requestFrame();
 }
 window.addEventListener("resize", resize);
@@ -764,13 +773,16 @@ function animOff(n){
   return [Math.sin(t+n._phase)*1.6, Math.cos(t*0.9+n._phase)*1.6];
 }
 const NO_OFF=[0,0];
+let lastPaint=0;
 function frame(){
   rafId=null;
   animTime=performance.now();
   let active=false;
   if(simAlpha>SIM_MIN){ stepSim(); simAlpha*=0.985; active=true; }
   if(focusPulse>0){ focusPulse-=0.04; active=true; }
-  render();
+  // when nothing is happening but idle motion is on, paint at ~30fps to save battery
+  const idleOnly = !active && !interacting;
+  if(!idleOnly || animTime-lastPaint>32){ lastPaint=animTime; render(); }
   if(active||interacting||state.animations) ensureLoop();
 }
 
@@ -822,6 +834,23 @@ function hexA(hex,a){
 }
 /* ---- sparkle theme: drifting four-point stars in the background ---- */
 let sparkleField=null;
+/* the pink glow is expensive to paint, so bake it once into an offscreen canvas */
+let bloomCache=null, bloomKey="";
+function drawBloom(){
+  const key=W+"x"+H+"|"+state.theme;
+  if(bloomKey!==key || !bloomCache){
+    const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(W)); c.height=Math.max(1,Math.round(H));
+    const g2=c.getContext("2d");
+    [[0.18,0.22,"#FF9ECB"],[0.82,0.30,"#E0A6FF"],[0.30,0.82,"#FFC2DC"],[0.72,0.76,"#FFD9A8"]].forEach(b=>{
+      const bx=b[0]*W, by=b[1]*H, rr=Math.max(W,H)*0.45;
+      const g=g2.createRadialGradient(bx,by,0,bx,by,rr);
+      g.addColorStop(0,hexA(b[2],0.32)); g.addColorStop(1,hexA(b[2],0));
+      g2.fillStyle=g; g2.fillRect(0,0,c.width,c.height);
+    });
+    bloomCache=c; bloomKey=key;
+  }
+  try{ ctx.drawImage(bloomCache,0,0,W,H); }catch(e){}
+}
 function sparkleCount(){ return state.sparkleFx===false ? 0 : TH().sparkles; }
 function drawSparkles(){
   const n=sparkleCount(); if(!n) return;
@@ -831,20 +860,7 @@ function drawSparkles(){
     for(let i=0;i<n;i++) sparkleField.push({x:rnd(),y:rnd(),s:0.7+rnd()*2.3,ph:rnd()*6.28,sp:0.25+rnd()*0.8,
       kind: rnd()>0.72 ? "gold" : (rnd()>0.30 ? "pink" : "white")});
   }
-  // soft pink light blooms so the whole canvas glows rather than sitting on flat white
-  if(TH().bloom){
-    const t2 = state.animations? animTime*0.00013 : 0;
-    const blobs=[[0.18,0.22,"#FF9ECB"],[0.82,0.30,"#E0A6FF"],[0.30,0.82,"#FFC2DC"],[0.72,0.76,"#FFD9A8"]];
-    ctx.save();
-    blobs.forEach((b,i)=>{
-      const bx=(b[0]+Math.sin(t2+i*1.7)*0.03)*W, by=(b[1]+Math.cos(t2*0.9+i*2.1)*0.03)*H;
-      const rr=Math.max(W,H)*0.42;
-      const g=ctx.createRadialGradient(bx,by,0,bx,by,rr);
-      g.addColorStop(0,hexA(b[2],0.30)); g.addColorStop(1,hexA(b[2],0));
-      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    });
-    ctx.restore();
-  }
+  if(TH().bloom) drawBloom();
   const t=state.animations? animTime*0.00045 : 0;
   ctx.save();
   for(const p of sparkleField){
@@ -856,8 +872,7 @@ function drawSparkles(){
     const warm = state.theme==="sparkle";
     ctx.fillStyle = p.kind==="gold" ? (warm?"#F5C451":"#FFE9A8")
                   : p.kind==="pink" ? (warm?"#FF6FB1":"#BFD8FF") : "#FFFFFF";
-    ctx.shadowColor = warm ? (p.kind==="gold"?"#F5C451":"#FF6FB1") : "#CFE3FF";
-    ctx.shadowBlur = 6+r*1.6;
+
     // four-point star
     ctx.beginPath();
     ctx.moveTo(x, y-r*2.1); ctx.quadraticCurveTo(x+r*0.35,y-r*0.35, x+r*2.1,y);
@@ -866,22 +881,18 @@ function drawSparkles(){
     ctx.quadraticCurveTo(x-r*0.35,y-r*0.35, x,y-r*2.1);
     ctx.fill();
   }
-  ctx.shadowBlur=0;
   ctx.restore();
 }
 /* ---- glossy highlight so bubbles read like pearls in the sparkle theme ---- */
 function drawGloss(sx,sy,r){
-  ctx.save();
-  ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.clip();
-  const g=ctx.createLinearGradient(sx-r,sy-r,sx,sy+r*0.2);
-  g.addColorStop(0,"rgba(255,255,255,0.72)");
-  g.addColorStop(0.45,"rgba(255,255,255,0.16)");
-  g.addColorStop(1,"rgba(255,255,255,0)");
-  ctx.fillStyle=g;
-  ctx.beginPath();
-  ctx.ellipse(sx-r*0.28, sy-r*0.40, r*0.62, r*0.42, -0.5, 0, Math.PI*2);
-  ctx.fill();
-  ctx.restore();
+  // cheap pearl highlight: two soft ellipses fully inside the bubble (no clipping)
+  const a=ctx.globalAlpha;
+  ctx.globalAlpha=a*0.30;
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath(); ctx.ellipse(sx-r*0.26, sy-r*0.34, r*0.46, r*0.30, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha=a*0.55;
+  ctx.beginPath(); ctx.ellipse(sx-r*0.30, sy-r*0.40, r*0.22, r*0.13, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha=a;
 }
 /* ---- geographic mode: latitude/longitude grid so it reads as a world map ---- */
 function drawGraticule(){
@@ -977,13 +988,15 @@ function drawNode(n){
     ctx.save(); ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.clip();
     if(fresh<0.85) ctx.globalAlpha = alpha*(0.55+0.45*fresh);   // photos desaturate by fading
     ctx.drawImage(im, sx-r, sy-r, r*2, r*2); ctx.restore();
+  } else if(r<15 && !isMe){
+    ctx.fillStyle=col; ctx.fill(); ctx.shadowBlur=0;   // too small to see a gradient — save the work
   } else {
     const grad=ctx.createRadialGradient(sx-r*0.3,sy-r*0.35,r*0.1, sx,sy,r);
     grad.addColorStop(0, isMe?TH().me0:col);
     grad.addColorStop(1, isMe?TH().me1:shade(col,-0.34));
     ctx.fillStyle=grad; ctx.fill(); ctx.shadowBlur=0;
   }
-  if(TH().gloss && r>7) drawGloss(sx,sy,r);
+  if(TH().gloss && r>11) drawGloss(sx,sy,r);
   // rim
   ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
   ctx.lineWidth=Math.max(0.5,(im?1.6:1.1)*cam.scale); ctx.strokeStyle=im?hexA(col,0.95):TH().rim; ctx.stroke();
@@ -1416,7 +1429,7 @@ function openDetail(n){
     <div class="row between">
       <div>
         <div class="sh-title">${esc(n.name)}</div>
-        <div class="sh-sub">${esc((CAT[n.category]||{}).label||"Person")}${cityOf(n)?` &middot; ${esc(cityOf(n))}`:""}${n.emoji?` ${n.emoji}`:""}${n.role?`<br/><span style="color:rgba(255,255,255,0.75)">${esc(n.role)}</span>`:""}</div>
+        <div class="sh-sub">${esc((CAT[n.category]||{}).label||"Person")}${cityOf(n)?` &middot; ${esc(cityOf(n))}`:""}${n.emoji?` ${n.emoji}`:""}${n.role?`<br/><span style="color:var(--txt)">${esc(n.role)}</span>`:""}</div>
       </div>
     </div>
 
@@ -1424,7 +1437,7 @@ function openDetail(n){
     ${contactBlock}
     <div class="chips" style="margin-top:10px">
       ${[30,60,90].map(d=>`<div class="chip cad ${n.cadenceDays===d?'on':''}" data-d="${d}" style="${n.cadenceDays===d?`background:${col};border-color:${col}`:''}">${d} days</div>`).join("")}
-      <div class="chip cad ${!n.cadenceDays?'on':''}" data-d="0" style="${!n.cadenceDays?'background:rgba(255,255,255,0.16)':''}">Off</div>
+      <div class="chip cad ${!n.cadenceDays?'on sel':''}" data-d="0">Off</div>
     </div>
     <button class="btn green" id="dLog">I just reached out to ${esc(firstName(n.name))}</button>
 
@@ -1437,25 +1450,25 @@ function openDetail(n){
 
     ${links?`<label class="fl">Reach out</label>${links}`:""}
     ${introducer?`<div style="font-size:13px;color:var(--txt2);margin-top:14px">&#128279; Introduced by ${esc(introducer.name)}</div>`:""}
-    ${n.notes?`<label class="fl">Notes</label><div style="font-size:14px;color:rgba(255,255,255,0.85);white-space:pre-wrap">${esc(n.notes)}</div>`:""}
+    ${n.notes?`<label class="fl">Notes</label><div style="font-size:14px;color:var(--txt);white-space:pre-wrap">${esc(n.notes)}</div>`:""}
 
     <label class="fl">Copilot</label>
     <div class="chips">
-      <div class="chip" id="dDraft" style="color:#fff">✨ Draft a message</div>
-      <div class="chip" id="dSummary" style="color:#fff">✨ Summarize</div>
+      <div class="chip act" id="dDraft">✨ Draft a message</div>
+      <div class="chip act" id="dSummary">✨ Summarize</div>
     </div>
 
     <label class="fl">Grow this branch</label>
     <div class="chips">
-      <div class="chip" id="addP" style="color:#fff">+ Person met through ${esc(firstName(n.name))}</div>
+      <div class="chip act" id="addP">+ Person met through ${esc(firstName(n.name))}</div>
     </div>
     <div class="chips" style="margin-top:8px">
-      <div class="chip" id="addL" style="color:#fff">+ Place</div>
-      <div class="chip" id="addE" style="color:#fff">+ Event</div>
+      <div class="chip act" id="addL">+ Place</div>
+      <div class="chip act" id="addE">+ Event</div>
     </div>
 
     <button class="btn ghost" id="dEdit">Edit</button>
-    <button class="btn primary" id="dFocus" style="background:rgba(255,255,255,0.08);color:#fff;border:0.5px solid var(--line2)">Center on ${esc(firstName(n.name))}</button>
+    <button class="btn ghost" id="dFocus">Center on ${esc(firstName(n.name))}</button>
     <button class="btn ghost" id="dPin">${n.pinned?"📌 Release position":"📌 Pin in place"}</button>
     <button class="btn danger" id="dDel">Remove from Orbit</button>
   `);
@@ -1484,14 +1497,14 @@ function openPlaceDetail(n){
   openSheet(`
     <div class="sh-title">${n.emoji||defEmoji} ${esc(n.name)}</div>
     <div class="sh-sub">${esc(n.description||(isEvent?"Event":"Place / group"))} &middot; ${people} ${people===1?"person":"people"}</div>
-    ${n.notes?`<label class="fl">Notes</label><div style="font-size:14px;color:rgba(255,255,255,0.85);white-space:pre-wrap">${esc(n.notes)}</div>`:""}
+    ${n.notes?`<label class="fl">Notes</label><div style="font-size:14px;color:var(--txt);white-space:pre-wrap">${esc(n.notes)}</div>`:""}
     <label class="fl">${isEvent?"Who did you meet here?":"Who do you know here?"}</label>
     <div class="chips">
-      <div class="chip" id="addP" style="color:#fff">+ Person</div>
-      <div class="chip" id="addL" style="color:#fff">+ Sub-place</div>
-      <div class="chip" id="addE" style="color:#fff">+ Event</div>
+      <div class="chip act" id="addP">+ Person</div>
+      <div class="chip act" id="addL">+ Sub-place</div>
+      <div class="chip act" id="addE">+ Event</div>
     </div>
-    <button class="btn primary" id="pFocus" style="background:${col};color:#fff">Center on ${esc(n.name)}</button>
+    <button class="btn primary" id="pFocus">Center on ${esc(n.name)}</button>
     <button class="btn ghost" id="pEdit">Edit</button>
     <button class="btn ghost" id="pPin">${n.pinned?"📌 Release position":"📌 Pin in place"}</button>
     <button class="btn danger" id="pDel">Remove from Orbit</button>
@@ -1511,9 +1524,9 @@ function openAddPicker(){
     <div class="sh-title">Add to your orbit</div>
     <div class="sh-sub">A person, a place, or an event where you met people</div>
     <div class="chips" style="margin-top:18px">
-      <div class="chip" id="tP" style="color:#fff;padding:20px 6px">&#128100;<div style="margin-top:8px">Person</div></div>
-      <div class="chip" id="tL" style="color:#fff;padding:20px 6px">&#127970;<div style="margin-top:8px">Place</div></div>
-      <div class="chip" id="tE" style="color:#fff;padding:20px 6px">&#127881;<div style="margin-top:8px">Event</div></div>
+      <div class="chip act" id="tP" style="padding:20px 6px">&#128100;<div style="margin-top:8px">Person</div></div>
+      <div class="chip act" id="tL" style="padding:20px 6px">&#127970;<div style="margin-top:8px">Place</div></div>
+      <div class="chip act" id="tE" style="padding:20px 6px">&#127881;<div style="margin-top:8px">Event</div></div>
     </div>
   `);
   document.getElementById("tP").onclick=()=>openPersonForm(null,"me");
@@ -1570,7 +1583,7 @@ function openPersonForm(node, parentId){
 
     <label class="fl">Check-in rhythm</label>
     <div class="chips" id="cadChips">
-      ${[0,30,60,90].map(x=>`<div class="chip cad2 ${(+d.cadenceDays||0)===x?'on':''}" data-d="${x}" style="${(+d.cadenceDays||0)===x?'background:rgba(255,255,255,0.16)':''}">${x===0?'Off':x+' days'}</div>`).join("")}
+      ${[0,30,60,90].map(x=>`<div class="chip cad2 ${(+d.cadenceDays||0)===x?'on sel':''}" data-d="${x}">${x===0?'Off':x+' days'}</div>`).join("")}
     </div>
 
     <label class="fl">Ways to reach them</label>
@@ -1600,8 +1613,8 @@ function openPersonForm(node, parentId){
     document.getElementById("fClose").style.accentColor=catC(cat); haptic();
   });
   sheet.querySelectorAll(".cad2").forEach(c=>c.onclick=()=>{ cad=+c.dataset.d;
-    sheet.querySelectorAll(".cad2").forEach(x=>{x.classList.remove("on");x.style.background="";});
-    c.classList.add("on"); c.style.background="rgba(255,255,255,0.16)"; haptic();
+    sheet.querySelectorAll(".cad2").forEach(x=>{x.classList.remove("on");x.classList.remove("sel");});
+    c.classList.add("on"); c.classList.add("sel"); haptic();
   });
   document.getElementById("fClose").oninput=e=>document.getElementById("clsV").textContent=e.target.value;
 
@@ -1727,11 +1740,11 @@ function openReminders(){
     </div>`;
   let body="";
   if(todayB.length){ body+=`<div class="seg-title">🎂 Birthdays today</div>`+todayB.map(p=>{
-    const rr=bestReach(p); const btn=rr?`<a class="chip" style="flex:0 0 auto;color:#fff;text-decoration:none;padding:8px 12px" href="${esc(rr.href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Message</a>`:"";
+    const rr=bestReach(p); const btn=rr?`<a class="chip act" style="flex:0 0 auto;text-decoration:none;padding:8px 12px" href="${esc(rr.href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Message</a>`:"";
     return row(p, "Turning "+(turningAge(p.birthday)||"?"), "#FFD60A","🎂",btn);
   }).join(""); }
   if(overdue.length){ body+=`<div class="seg-title" style="color:var(--red)">Overdue to reconnect</div>`+overdue.map(o=>{
-    const rr=bestReach(o.p); const btn=rr?`<a class="chip" style="flex:0 0 auto;color:#fff;text-decoration:none;padding:8px 12px" href="${esc(rr.href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Reach</a>`:"";
+    const rr=bestReach(o.p); const btn=rr?`<a class="chip act" style="flex:0 0 auto;text-decoration:none;padding:8px 12px" href="${esc(rr.href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Reach</a>`:"";
     return row(o.p, `${o.over} day${o.over===1?"":"s"} overdue`, "#FF453A","⏰",btn);
   }).join(""); }
   if(soonB.length){ body+=`<div class="seg-title">Upcoming birthdays</div>`+soonB.map(s=>row(s.p, `in ${s.du} day${s.du===1?"":"s"} &middot; ${new Date(s.p.birthday).toLocaleDateString(undefined,{month:'short',day:'numeric'})}`,"#FF9F0A","🎈")).join(""); }
@@ -1778,7 +1791,7 @@ function openMenu(){
 
     ${accountsEnabled()?`<label class="fl">Account</label>
       ${signedIn()
-        ? `<div style="font-size:13px;color:var(--txt2);padding:2px 2px 8px">Signed in as <b style="color:#fff">${esc(sbUser.email||"you")}</b> &middot; syncing automatically</div>
+        ? `<div style="font-size:13px;color:var(--txt2);padding:2px 2px 8px">Signed in as <b style="color:var(--txt)">${esc(sbUser.email||"you")}</b> &middot; syncing automatically</div>
            <button class="btn primary" id="mSbSync">Sync now</button>
            <button class="btn ghost" id="mSbOut">Sign out</button>`
         : `<div style="font-size:13px;color:var(--txt2);padding:2px 2px 8px">Not signed in — this device only.</div>
@@ -1797,16 +1810,16 @@ function openMenu(){
 
     <label class="fl">Look &amp; feel${state.theme==="sparkle"?" ✨":""}</label>
     <div class="chips">
-      <div class="chip thm ${state.theme!=="sparkle"?'on':''}" data-t="midnight" style="${state.theme!=="sparkle"?'background:#1c1c2e;border-color:#444;color:#fff':''}">🌙 Midnight</div>
-      <div class="chip thm ${state.theme==="sparkle"?'on':''}" data-t="sparkle" style="${state.theme==="sparkle"?'background:linear-gradient(135deg,#FF7EB3,#FF4D9D);border-color:#FF4D9D;color:#fff':''}">✨ Sparkle</div>
+      <div class="chip thm ${state.theme!=="sparkle"?'on sel':''}" data-t="midnight">🌙 Midnight</div>
+      <div class="chip thm ${state.theme==="sparkle"?'on sel':''}" data-t="sparkle">✨ Sparkle</div>
     </div>
 
     <label class="fl">View</label>
     <div class="chips">
-      <div class="chip vtog ${state.geo?'on':''}" data-v="geo" style="${state.geo?'background:rgba(255,255,255,0.16);color:#fff':''}">🌍 World map</div>
-      <div class="chip vtog ${state.hulls?'on':''}" data-v="hulls" style="${state.hulls?'background:rgba(255,255,255,0.16);color:#fff':''}">Clusters</div>
-      <div class="chip vtog ${state.sparkleFx!==false?'on':''}" data-v="sparkleFx" style="${state.sparkleFx!==false?'background:rgba(255,255,255,0.16);color:#fff':''}">✨ Sparkles</div>
-      <div class="chip vtog ${state.decay?'on':''}" data-v="decay" style="${state.decay?'background:rgba(255,255,255,0.16);color:#fff':''}">Fade stale</div>
+      <div class="chip vtog ${state.geo?'on sel':''}" data-v="geo">🌍 World map</div>
+      <div class="chip vtog ${state.hulls?'on sel':''}" data-v="hulls">Clusters</div>
+      <div class="chip vtog ${state.sparkleFx!==false?'on sel':''}" data-v="sparkleFx">✨ Sparkles</div>
+      <div class="chip vtog ${state.decay?'on sel':''}" data-v="decay">Fade stale</div>
       <div class="chip vtog ${state.colorMode==="cluster"?'on':''}" data-v="colorMode" style="${state.colorMode==="cluster"?'background:rgba(255,255,255,0.16);color:#fff':''}">Colour by group</div>
     </div>
     <div style="font-size:11px;color:var(--txt3);line-height:1.5;margin-top:8px">
@@ -1883,8 +1896,7 @@ function openMenu(){
     else state[v]=!state[v];
     if(v==="sparkleFx") sparkleField=null;
     const on = v==="colorMode" ? state.colorMode==="cluster" : !!state[v];
-    c.classList.toggle("on",on);
-    c.style.background=on?"rgba(255,255,255,0.16)":""; c.style.color=on?"#fff":"";
+    c.classList.toggle("on",on); c.classList.toggle("sel",on);
     if(v==="geo"){ if(state.geo) enterGeo(); else exitGeo(); }
     save(); rebuild(); kick(v==="geo"?0.9:0.3); requestFrame();
     if(v==="geo"){ closeSheet(); setTimeout(fitAll,420); toast(state.geo?"World map on":"Free-form layout"); }
@@ -2141,7 +2153,7 @@ function openGaps(kind){
   const k=kind||"reach";
   const titles={reach:"No way to reach them",bday:"Missing birthday",photo:"No photo",cadence:"No check-in rhythm"};
   const list=g[k]||[];
-  const tab=(id,label,count)=>`<div class="chip gtab ${k===id?'on':''}" data-k="${id}" style="${k===id?'background:rgba(255,255,255,0.16);color:#fff':''}">${label} ${count}</div>`;
+  const tab=(id,label,count)=>`<div class="chip gtab ${k===id?'on sel':''}" data-k="${id}">${label} ${count}</div>`;
   const rows=list.slice(0,80).map(p=>`<div class="rem-item" data-id="${p.id}">
       <div class="dot" style="background:${hexA(nodeColor(p),0.22)};color:${nodeColor(p)}">${p.emoji||initials(p.name)}</div>
       <div style="flex:1;min-width:0"><div class="nm">${esc(p.name)}</div><div class="ds">${esc(cityOf(p)||pathString(p))}</div></div>
@@ -2552,7 +2564,7 @@ function openAISetup(){
   openSheet(`<div class="sh-title">AI copilot</div>
     <div class="sh-sub">Uses <b>your own</b> API key, called straight from your phone. The key is stored only on this device.</div>
     <label class="fl">Provider</label>
-    <div class="chips"><div class="chip aiProv ${c.provider!=="openai"?"on":""}" data-p="anthropic" style="color:#fff">Anthropic</div><div class="chip aiProv ${c.provider==="openai"?"on":""}" data-p="openai" style="color:#fff">OpenAI</div></div>
+    <div class="chips"><div class="chip act aiProv ${c.provider!=="openai"?"on":""}" data-p="anthropic">Anthropic</div><div class="chip act aiProv ${c.provider==="openai"?"on":""}" data-p="openai">OpenAI</div></div>
     <label class="fl">API key</label>
     <input id="aiKey" value="${esc(c.key||"")}" placeholder="paste your key" autocomplete="off"/>
     <label class="fl">Model (optional)</label>
@@ -2567,9 +2579,9 @@ function openDraft(n){
   if(!aiReady()) return openAISetup();
   openSheet(`<div class="sh-title">Draft a message</div><div class="sh-sub">to ${esc(n.name)}</div>
     <div class="chips" style="margin-top:12px">
-      <div class="chip aiIntent on" data-i="reconnect" style="color:#fff">Reconnect</div>
-      <div class="chip aiIntent" data-i="birthday" style="color:#fff">Birthday</div>
-      <div class="chip aiIntent" data-i="checkin" style="color:#fff">Quick hello</div>
+      <div class="chip act aiIntent on" data-i="reconnect">Reconnect</div>
+      <div class="chip act aiIntent" data-i="birthday">Birthday</div>
+      <div class="chip act aiIntent" data-i="checkin">Quick hello</div>
     </div>
     <textarea id="aiExtra" placeholder="Anything specific to include? (optional)" style="min-height:60px;margin-top:10px"></textarea>
     <button class="btn primary" id="aiGo">✨ Generate</button>
@@ -2638,7 +2650,7 @@ function applyTheme(){
   if(meta) meta.setAttribute("content", sp?"#FFEBF4":"#000000");
   const sbar=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
   if(sbar) sbar.setAttribute("content", sp?"default":"black-translucent");
-  sparkleField=null;
+  sparkleField=null; bloomCache=null;
   const bi=document.getElementById("bootIcon"); if(bi) bi.src=currentIcon();
   const ai=document.getElementById("authIcon"); if(ai) ai.src=currentIcon();
   refreshPWAIcons();
