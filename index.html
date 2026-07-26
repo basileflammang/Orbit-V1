@@ -241,7 +241,8 @@ const FS = '-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif'
    STATE + PERSISTENCE
 ============================================================ */
 const KEY = "orbit.state.v3";
-let state = { userName:null, nodes:[], cam:null, tombstones:{}, filters:{}, animations:true };
+let state = { userName:null, nodes:[], cam:null, tombstones:{}, filters:{}, animations:true,
+              colorMode:"cluster", hulls:true, decay:true, geo:false };
 let ME = { id:"me", type:"me", name:"Me", parentId:null, x:0, y:0, vx:0, vy:0 };
 
 function load(){
@@ -260,6 +261,8 @@ function load(){
       state.tombstones = (s.tombstones && typeof s.tombstones==="object") ? s.tombstones : {};
       state.filters = (s.filters && typeof s.filters==="object") ? s.filters : {};
       state.animations = s.animations!==false;
+      state.colorMode = s.colorMode==="category" ? "category" : "cluster";
+      state.hulls = s.hulls!==false; state.decay = s.decay!==false; state.geo = s.geo===true;
       if(s.me){ ME = Object.assign(ME, s.me); }
     }
   }catch(e){}
@@ -274,7 +277,8 @@ function save(){
         userName: state.userName, nodes: plainNodes(),
         me:{x:ME.x,y:ME.y,name:ME.name},
         cam:{x:cam.x,y:cam.y,scale:cam.scale},
-        tombstones: state.tombstones, filters: state.filters, animations: state.animations
+        tombstones: state.tombstones, filters: state.filters, animations: state.animations,
+        colorMode: state.colorMode, hulls: state.hulls, decay: state.decay, geo: state.geo
       }));
       localStorage.setItem("orbit.lastlocal", String(Date.now()));
     }catch(e){}
@@ -294,6 +298,42 @@ const CAT = {
 };
 const PLACE_C = "#BF5AF2";
 const EVENT_C = "#40C8E0";
+// distinct hues assigned per top-level cluster so each branch reads as its own territory
+const CLUSTER_HUES = [198,275,12,145,42,320,176,255,92,60,228,300];
+function hslHex(h,s,l){
+  s/=100; l/=100;
+  const k=n=>(n+h/30)%12, a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(Math.min(k(n)-3,9-k(n)),1));
+  const to=v=>Math.round(255*v).toString(16).padStart(2,"0");
+  return "#"+to(f(0))+to(f(8))+to(f(4));
+}
+// known geography for geographic mode (lon/lat)
+const GEO = {
+  "lisbon":[-9.14,38.72],"lisboa":[-9.14,38.72],"luxembourg":[6.13,49.61],"rotterdam":[4.48,51.92],
+  "amsterdam":[4.90,52.37],"netherlands":[5.29,52.13],"holland":[5.29,52.13],"canada":[-73.57,45.50],
+  "montreal":[-73.57,45.50],"montréal":[-73.57,45.50],"toronto":[-79.38,43.65],"switzerland":[8.23,46.82],
+  "zurich":[8.54,47.37],"geneva":[6.14,46.20],"australia":[151.21,-33.87],"sydney":[151.21,-33.87],
+  "melbourne":[144.96,-37.81],"france":[2.35,48.86],"paris":[2.35,48.86],"lyon":[4.83,45.76],
+  "belgium":[4.35,50.85],"brussels":[4.35,50.85],"germany":[13.40,52.52],"berlin":[13.40,52.52],
+  "munich":[11.58,48.14],"uk":[-0.13,51.51],"london":[-0.13,51.51],"usa":[-74.01,40.71],
+  "new york":[-74.01,40.71],"nyc":[-74.01,40.71],"boston":[-71.06,42.36],"sf":[-122.42,37.77],
+  "san francisco":[-122.42,37.77],"spain":[-3.70,40.42],"madrid":[-3.70,40.42],"barcelona":[2.17,41.39],
+  "italy":[12.50,41.90],"rome":[12.50,41.90],"milan":[9.19,45.46],"portugal":[-9.14,38.72],
+  "porto":[-8.61,41.15],"denmark":[12.57,55.68],"copenhagen":[12.57,55.68],"sweden":[18.07,59.33],
+  "stockholm":[18.07,59.33],"norway":[10.75,59.91],"oslo":[10.75,59.91],"brazil":[-46.63,-23.55],
+  "japan":[139.69,35.69],"tokyo":[139.69,35.69],"china":[121.47,31.23],"shanghai":[121.47,31.23],
+  "india":[72.88,19.08],"mumbai":[72.88,19.08],"dubai":[55.27,25.20],"singapore":[103.82,1.35],
+  "ireland":[-6.26,53.35],"dublin":[-6.26,53.35],"austria":[16.37,48.21],"vienna":[16.37,48.21],
+  "poland":[21.01,52.23],"warsaw":[21.01,52.23],"mexico":[-99.13,19.43],"argentina":[-58.38,-34.60],
+  "morocco":[-7.59,33.57],"south africa":[18.42,-33.93],"cape town":[18.42,-33.93],"greece":[23.73,37.98],
+  "athens":[23.73,37.98],"turkey":[28.98,41.01],"istanbul":[28.98,41.01],"israel":[34.78,32.08],
+  "tel aviv":[34.78,32.08],"korea":[126.98,37.57],"seoul":[126.98,37.57],"thailand":[100.50,13.76],
+  "bangkok":[100.50,13.76],"vietnam":[105.83,21.03],"indonesia":[106.85,-6.21],"bali":[115.19,-8.41],
+  "new zealand":[174.78,-41.29],"chile":[-70.65,-33.46],"colombia":[-74.07,4.71],"peru":[-77.04,-12.05]
+};
+const GEO_SCALE = 26;   // world degrees -> world units
+function geoOf(n){ const k=(n.name||"").trim().toLowerCase(); return GEO[k]||null; }
+function geoCount(){ return state.nodes.filter(n=>isContainerType(n.type)&&geoOf(n)).length; }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const DAY = 86400000;
@@ -304,11 +344,18 @@ function shade(hex, amt){
   const f=v=>clamp(Math.round(v*(1+amt)),0,255).toString(16).padStart(2,"0");
   return "#"+f(r)+f(g)+f(b);
 }
-function nodeColor(n){
+function catColor(n){
   if(n.type==="me") return "#FFFFFF";
   if(n.type==="place") return PLACE_C;
   if(n.type==="event") return EVENT_C;
   return (CAT[n.category]||CAT.friend).c;
+}
+// on the map we colour by CLUSTER (territory) — category survives as a small badge
+function nodeColor(n){
+  if(n.type==="me") return "#FFFFFF";
+  if(state.colorMode==="category" || n._hue==null) return catColor(n);
+  const container = isContainerType(n.type);
+  return hslHex(n._hue, container?62:58, container?58:50);
 }
 function isContainerType(t){ return t==="place"||t==="event"; }
 function allNodes(){ return [ME, ...state.nodes]; }
@@ -335,6 +382,23 @@ function rebuild(){
   // visibility (category / type filters), inherited from ancestors
   ME._vis = true;
   (function vis(n){ for(const k of n._kids){ k._vis = n._vis && ownVisible(k); vis(k); } })(ME);
+  // cluster identity: each top-level branch gets a hue, inherited by its whole subtree
+  ME._hue = null; ME._depth = 0; ME._root = null;
+  ME._kids.forEach((k,i)=>{
+    const hue = CLUSTER_HUES[i % CLUSTER_HUES.length];
+    (function paint(n,d){ n._hue=hue; n._root=k.id; n._depth=d; for(const c of n._kids) paint(c,d+1); })(k,1);
+  });
+  // relationship freshness 0..1 (1 = fresh) for decay visuals
+  allNodes().forEach(n=>{ n._fresh = freshness(n); });
+  recomputeAmbiguous();
+}
+// 1 = recently in touch, 0 = long gone. Uses cadence when set, else a 180-day yardstick.
+function freshness(n){
+  if(n.type!=="person") return 1;
+  if(!n.lastContact) return 0.45;                 // unknown — muted, not dead
+  const el=(Date.now()-n.lastContact)/DAY;
+  const span=(n.cadenceDays||120)*2.2;
+  return clamp(1-el/span, 0, 1);
 }
 // weight = size of the whole subtree; sqrt keeps it in proportion. More attached ⇒ bigger.
 function baseR(n){ const w = 1 + (n._desc||0); return 6 + 14*Math.sqrt(w); }
@@ -450,13 +514,30 @@ function stepSim(){
       if(d<min){ const push=(min-d)*0.5; const fx=(dx/d)*push, fy=(dy/d)*push; a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy; }
     }
   }
-  // gentle centering
-  for(const p of all){ p.vx += (0-p.x)*0.0015; p.vy += (0-p.y)*0.0015; }
+  if(!state.geo){
+    // gentle centering (free-form mode)
+    for(const p of all){ p.vx += (0-p.x)*0.0015; p.vy += (0-p.y)*0.0015; }
+  }
   // integrate
   for(const p of all){
-    if(p===ME){ p.x=0; p.y=0; p.vx=0; p.vy=0; continue; }
+    if(p===ME){
+      if(state.geo){ // sit in the middle of your world instead of at (0,0)
+        const gs=all.filter(q=>isContainerType(q.type)&&geoOf(q));
+        if(gs.length){ let tx=0,ty=0; gs.forEach(q=>{const g=geoOf(q); tx+=g[0]*GEO_SCALE; ty+=-g[1]*GEO_SCALE*1.25;});
+          tx/=gs.length; ty/=gs.length; p.x+=(tx-p.x)*0.08; p.y+=(ty-p.y)*0.08; }
+        p.vx=0; p.vy=0; continue;
+      }
+      p.x=0; p.y=0; p.vx=0; p.vy=0; continue;
+    }
     if(p._drag){ p.vx=0; p.vy=0; continue; }
-    if(p.pinned){ p.vx=0; p.vy=0; continue; }   // stays where you placed it
+    // geographic mode: anchored places are positioned absolutely, so real-world
+    // distances can't be overpowered by the parent springs
+    if(state.geo && isContainerType(p.type)){
+      const g=geoOf(p);
+      if(g){ const tx=g[0]*GEO_SCALE, ty=-g[1]*GEO_SCALE*1.25;
+        p.x += (tx-p.x)*0.12; p.y += (ty-p.y)*0.12; p.vx=0; p.vy=0; continue; }
+    }
+    if(p.pinned && !state.geo){ p.vx=0; p.vy=0; continue; }   // stays where you placed it
     p.vx*=0.82; p.vy*=0.82;
     const sp=Math.hypot(p.vx,p.vy); const MX=18; if(sp>MX){ p.vx=p.vx/sp*MX; p.vy=p.vy/sp*MX; }
     p.x += p.vx*simAlpha*1.4; p.y += p.vy*simAlpha*1.4;
@@ -495,17 +576,23 @@ function render(){
   ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
 
   const all = allNodes();
-  // ---- links ----
-  ctx.lineWidth = Math.max(0.6, 1*cam.scale);
+  if(state.geo) drawGraticule();
+  // ---- cluster membranes (soft territory behind each top-level branch) ----
+  if(state.hulls) drawHulls(all);
+  // ---- links (curved, thickness by closeness, faded by decay) ----
   for(const c of all){
     if(c.parentId==null || c._vis===false) continue;
     const p=byId(c.parentId); if(!p||p.x==null||c.x==null||p._vis===false) continue;
-    const col = nodeColor(c.type==="place"?c:p);
-    ctx.strokeStyle = hexA(nodeColor(c), 0.22);
-    ctx.beginPath();
-    ctx.moveTo(toScreenX(p.x),toScreenY(p.y));
-    ctx.lineTo(toScreenX(c.x),toScreenY(c.y));
-    ctx.stroke();
+    const ax=toScreenX(p.x+animOff(p)[0]), ay=toScreenY(p.y+animOff(p)[1]);
+    const bx=toScreenX(c.x+animOff(c)[0]), by=toScreenY(c.y+animOff(c)[1]);
+    const w = c.type==="person" ? (0.5+((c.closeness||5)/10)*1.9) : 1.7;
+    ctx.lineWidth = Math.max(0.5, w*cam.scale);
+    const fade = state.decay ? (0.10+0.26*(c._fresh==null?1:c._fresh)) : 0.26;
+    ctx.strokeStyle = hexA(nodeColor(c), fade*dimFactor(c));
+    // gentle arc between parent and child
+    const mx=(ax+bx)/2, my=(ay+by)/2, dx=bx-ax, dy=by-ay;
+    const cxp=mx-dy*0.09, cyp=my+dx*0.09;
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.quadraticCurveTo(cxp,cyp,bx,by); ctx.stroke();
   }
   // introduced-by (dashed)
   ctx.setLineDash([2,5]);
@@ -527,20 +614,99 @@ function hexA(hex,a){
   const h=hex.replace("#",""); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);
   return `rgba(${r},${g},${b},${a})`;
 }
+/* ---- geographic mode: latitude/longitude grid so it reads as a world map ---- */
+function drawGraticule(){
+  ctx.save();
+  ctx.lineWidth=1;
+  for(let lon=-180;lon<=180;lon+=30){
+    const x=toScreenX(lon*GEO_SCALE);
+    if(x<-40||x>W+40) continue;
+    ctx.strokeStyle = lon===0 ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.055)";
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for(let lat=-60;lat<=80;lat+=20){
+    const y=toScreenY(-lat*GEO_SCALE*1.25);
+    if(y<-40||y>H+40) continue;
+    ctx.strokeStyle = lat===0 ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.055)";
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+    if(cam.scale>0.25){
+      ctx.font=`500 10px ${FS}`; ctx.fillStyle="rgba(255,255,255,0.22)"; ctx.textAlign="left"; ctx.textBaseline="bottom";
+      ctx.fillText((lat===0?"equator":(Math.abs(lat)+"°"+(lat>0?"N":"S"))), 8, y-2);
+    }
+  }
+  ctx.restore();
+}
+/* ---- focus mode: when something is selected, its branch stays bright, rest dims ---- */
+function dimFactor(n){
+  if(!selectedId || selectedId==="me") return 1;
+  const sel=byId(selectedId); if(!sel) return 1;
+  if(n.id===selectedId) return 1;
+  const selRoot = sel._root || sel.id;
+  const inBranch = (n._root===selRoot) || isAncestorOf(sel,n) || isAncestorOf(n,sel);
+  return inBranch ? 0.92 : 0.24;
+}
+function isAncestorOf(a,b){ let cur=b, g=0; while(cur && g++<60){ if(cur.id===a.id) return true; cur=byId(cur.parentId); } return false; }
+/* ---- convex hull (monotone chain) + rounded blob per cluster ---- */
+function hullOf(pts){
+  if(pts.length<3) return pts;
+  const p=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  const cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const lo=[]; for(const q of p){ while(lo.length>=2 && cross(lo[lo.length-2],lo[lo.length-1],q)<=0) lo.pop(); lo.push(q); }
+  const up=[]; for(let i=p.length-1;i>=0;i--){ const q=p[i]; while(up.length>=2 && cross(up[up.length-2],up[up.length-1],q)<=0) up.pop(); up.push(q); }
+  return lo.slice(0,-1).concat(up.slice(0,-1));
+}
+function drawHulls(all){
+  const groups={};
+  for(const n of all){
+    if(n.type==="me"||n._vis===false||n.x==null||n._root==null) continue;
+    (groups[n._root]||(groups[n._root]=[])).push(n);
+  }
+  for(const rootId in groups){
+    const g=groups[rootId]; if(g.length<2) continue;
+    const root=byId(rootId); if(!root) continue;
+    // sample a ring around each node so the blob wraps bubbles, not just centres
+    const pts=[];
+    for(const n of g){
+      const pad=n._r*cam.scale+16*Math.min(cam.scale,1.4)+10;
+      const sx=toScreenX(n.x+animOff(n)[0]), sy=toScreenY(n.y+animOff(n)[1]);
+      for(let a=0;a<Math.PI*2;a+=Math.PI/4) pts.push([sx+Math.cos(a)*pad, sy+Math.sin(a)*pad]);
+    }
+    const h=hullOf(pts); if(h.length<3) continue;
+    const col=hslHex(root._hue==null?200:root._hue, 60, 55);
+    ctx.save();
+    ctx.beginPath();
+    // rounded polygon via midpoint quadratics
+    ctx.moveTo((h[0][0]+h[h.length-1][0])/2,(h[0][1]+h[h.length-1][1])/2);
+    for(let i=0;i<h.length;i++){
+      const cur=h[i], nxt=h[(i+1)%h.length];
+      ctx.quadraticCurveTo(cur[0],cur[1],(cur[0]+nxt[0])/2,(cur[1]+nxt[1])/2);
+    }
+    ctx.closePath();
+    const a=dimFactor(g[0]);
+    ctx.fillStyle=hexA(col, 0.075*a); ctx.fill();
+    ctx.lineWidth=1; ctx.strokeStyle=hexA(col, 0.20*a); ctx.stroke();
+    ctx.restore();
+  }
+}
 function drawNode(n){
   const off=animOff(n);
   const sx=toScreenX(n.x+off[0]), sy=toScreenY(n.y+off[1]), r=n._r*cam.scale;
-  if(sx< -r-60||sx>W+r+60||sy<-r-60||sy>H+r+60) return; // cull
+  if(sx< -r-80||sx>W+r+80||sy<-r-80||sy>H+r+80) return; // cull
   const col = nodeColor(n);
   const isMe = n.type==="me", isContainer = isContainerType(n.type);
   const im = getImg(n);
+  const fresh = (state.decay && n.type==="person") ? (n._fresh==null?1:n._fresh) : 1;
+  const alpha = dimFactor(n) * (0.42 + 0.58*fresh);   // stale people fade out
+  ctx.save();
+  ctx.globalAlpha = alpha;
 
   // glow + body (photo fills the bubble if present)
-  ctx.shadowColor = hexA(col, 0.5); ctx.shadowBlur = Math.min(30, r*0.7);
+  ctx.shadowColor = hexA(col, 0.5*fresh); ctx.shadowBlur = Math.min(30, r*0.7)*(0.4+0.6*fresh);
   ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
   if(im){
     ctx.fillStyle=shade(col,-0.2); ctx.fill(); ctx.shadowBlur=0;
     ctx.save(); ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.clip();
+    if(fresh<0.85) ctx.globalAlpha = alpha*(0.55+0.45*fresh);   // photos desaturate by fading
     ctx.drawImage(im, sx-r, sy-r, r*2, r*2); ctx.restore();
   } else {
     const grad=ctx.createRadialGradient(sx-r*0.3,sy-r*0.35,r*0.1, sx,sy,r);
@@ -551,6 +717,13 @@ function drawNode(n){
   // rim
   ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2);
   ctx.lineWidth=Math.max(0.5,(im?1.6:0.8)*cam.scale); ctx.strokeStyle=im?hexA(col,0.95):"rgba(255,255,255,0.25)"; ctx.stroke();
+  // category badge (small dot) since body colour now encodes the cluster
+  if(n.type==="person" && state.colorMode==="cluster" && r>11){
+    const bd=Math.max(3, r*0.19), bx=sx-r*0.70, by=sy+r*0.70;
+    ctx.beginPath(); ctx.arc(bx,by,bd,0,Math.PI*2);
+    ctx.fillStyle=catColor(n); ctx.fill();
+    ctx.lineWidth=Math.max(0.5,1*cam.scale); ctx.strokeStyle="rgba(0,0,0,0.55)"; ctx.stroke();
+  }
 
   // contact status ring (people)
   if(n.type==="person"){
@@ -599,17 +772,71 @@ function drawNode(n){
       else { ctx.font=`700 ${Math.round(r*0.6)}px ${FS}`; ctx.fillText(initials(n.name),sx,sy); }
     }
   }
-  // label (LOD: only when the bubble is reasonably large on screen)
-  const screenR=r;
-  if(screenR>13 || isContainer || isMe){
-    const label = isContainer? n.name : firstName(n.name);
-    ctx.font=`${isContainer?"700":"600"} ${clamp(Math.round(11*Math.min(cam.scale,1.3)),10,15)}px ${FS}`;
+  /* ---- LOD: how much text to reveal, based on on-screen size ---- */
+  const showName   = r>11 || isContainer || isMe;
+  const showDetail = r>34 && !isMe;             // zoomed in enough for a mini card
+  if(showName){
+    const label = (isContainer||isMe) ? n.name : displayName(n);
+    ctx.font=`${isContainer?"700":"600"} ${clamp(Math.round(11*Math.min(cam.scale,1.35)),10,16)}px ${FS}`;
     ctx.textAlign="center"; ctx.textBaseline="top";
-    ctx.fillStyle= n.type==="place"?"#E7D3FA": n.type==="event"?"#C7EEFA":"rgba(255,255,255,0.92)";
-    ctx.shadowColor="rgba(0,0,0,0.85)"; ctx.shadowBlur=5;
+    ctx.fillStyle= n.type==="place"?"#E7D3FA": n.type==="event"?"#C7EEFA":"rgba(255,255,255,0.94)";
+    ctx.shadowColor="rgba(0,0,0,0.9)"; ctx.shadowBlur=5;
     ctx.fillText(label, sx, sy+r+5);
     ctx.shadowBlur=0;
+    if(showDetail){
+      const lines=detailLines(n);
+      ctx.font=`500 ${clamp(Math.round(9.5*Math.min(cam.scale,1.3)),9,13)}px ${FS}`;
+      let yy=sy+r+5+clamp(Math.round(11*Math.min(cam.scale,1.35)),10,16)+3;
+      ctx.shadowColor="rgba(0,0,0,0.9)"; ctx.shadowBlur=4;
+      for(const ln of lines){
+        ctx.fillStyle=ln.c||"rgba(255,255,255,0.62)";
+        ctx.fillText(ln.t, sx, yy); yy+=clamp(Math.round(11*Math.min(cam.scale,1.3)),10,14);
+      }
+      ctx.shadowBlur=0;
+    }
   }
+  ctx.restore();
+}
+/* first name, plus a surname initial when two people share a first name */
+function displayName(n){
+  const f=firstName(n.name);
+  if(!ambiguousFirst.has(f.toLowerCase())) return f;
+  const parts=(n.name||"").trim().split(/\s+/);
+  return parts.length>1 ? f+" "+parts[parts.length-1][0].toUpperCase()+"." : f;
+}
+let ambiguousFirst=new Set();
+function recomputeAmbiguous(){
+  const seen={}; ambiguousFirst=new Set();
+  state.nodes.forEach(n=>{ if(n.type!=="person") return; const f=firstName(n.name).toLowerCase(); if(!f) return;
+    if(seen[f]) ambiguousFirst.add(f); else seen[f]=1; });
+}
+/* the mini card revealed when zoomed in */
+function detailLines(n){
+  const out=[];
+  if(isContainerType(n.type)){
+    const c=n._desc||0;
+    out.push({t:(n.description||(n.type==="event"?"Event":"Place"))+" · "+c+(c===1?" person":" people")});
+    return out;
+  }
+  const bits=[];
+  if(n.role) bits.push(n.role);
+  const city=cityOf(n); if(city) bits.push(city);
+  if(bits.length) out.push({t:bits.join(" · ")});
+  const cs=contactStatus(n);
+  if(cs) out.push({t: cs.state==="overdue" ? (Math.abs(cs.left)+"d overdue") : (cs.left+"d to check in"), c:cs.color});
+  else if(n.lastContact) out.push({t:"last "+elapsedDays(n.lastContact)+"d ago"});
+  if(n.birthday){ const du=daysUntilBirthday(n.birthday);
+    if(du!=null && du<=45) out.push({t: du===0?"🎂 today":"🎂 in "+du+"d", c:"#FF9F0A"}); }
+  const s=n.socials||{}; const icons=Object.keys(SOCIAL_META).filter(k=>s[k]).map(k=>SOCIAL_META[k].i);
+  if(icons.length) out.push({t:icons.join("  "), c:"rgba(255,255,255,0.45)"});
+  return out.slice(0,4);
+}
+/* city inherited from the nearest place ancestor (free data — no typing) */
+function cityOf(n){
+  if(n.city) return n.city;
+  let cur=byId(n.parentId), g=0;
+  while(cur && g++<60){ if(cur.type==="place") return cur.name; cur=byId(cur.parentId); }
+  return "";
 }
 const imgCache={};
 function getImg(n){
@@ -908,7 +1135,7 @@ function openDetail(n){
     <div class="row between">
       <div>
         <div class="sh-title">${esc(n.name)}</div>
-        <div class="sh-sub">${esc((CAT[n.category]||{}).label||"Person")}${n.city?` &middot; ${esc(n.city)}`:""}${n.emoji?` ${n.emoji}`:""}</div>
+        <div class="sh-sub">${esc((CAT[n.category]||{}).label||"Person")}${cityOf(n)?` &middot; ${esc(cityOf(n))}`:""}${n.emoji?` ${n.emoji}`:""}${n.role?`<br/><span style="color:rgba(255,255,255,0.75)">${esc(n.role)}</span>`:""}</div>
       </div>
     </div>
 
@@ -1040,6 +1267,9 @@ function openPersonForm(node, parentId){
     <label class="fl">Name</label>
     <input id="fName" value="${esc(d.name||"")}" placeholder="Who are they?" autocomplete="off"/>
 
+    <label class="fl">What they do (optional)</label>
+    <input id="fRole" value="${esc(d.role||"")}" placeholder="e.g. Product @ Adyen, med student" autocomplete="off"/>
+
     <label class="fl">Relationship</label>
     <div class="chips" id="catChips">
       ${Object.entries(CAT).map(([k,v])=>`<div class="chip cat ${d.category===k?'on':''}" data-k="${k}" style="${d.category===k?`background:${v.c};border-color:${v.c}`:''}">${v.label}</div>`).join("")}
@@ -1108,6 +1338,7 @@ function openPersonForm(node, parentId){
       socials,
       introducedById: document.getElementById("fIntro")?document.getElementById("fIntro").value||null:(d.introducedById||null),
       notes:document.getElementById("fNotes").value.trim(),
+      role:(document.getElementById("fRole")?document.getElementById("fRole").value.trim():(d.role||"")),
       photo: photoData||"",
     };
     if(cad && !d.lastContact && !isEdit) patch.lastContact=Date.now();
@@ -1253,7 +1484,8 @@ function openSearch(){
 /* ---------- MENU (backup etc) ---------- */
 function backupJSON(){
   // include each node's full ancestor path so any future version can rebuild the whole tree
-  const nodes = state.nodes.map(n=>Object.assign({}, n, {_kids:undefined,_desc:undefined,_r:undefined,_drag:undefined, path:pathOf(n)}));
+  // strip every runtime field (anything starting with "_") so backups stay clean
+  const nodes = state.nodes.map(n=>{ const o={}; for(const k in n){ if(k.charAt(0)!=="_") o[k]=n[k]; } o.path=pathOf(n); return o; });
   return JSON.stringify({app:"orbit",version:4,userName:state.userName,me:{name:ME.name},nodes,tombstones:state.tombstones||{},exported:new Date().toISOString()},null,2);
 }
 function openMenu(){
@@ -1269,6 +1501,20 @@ function openMenu(){
     <button class="btn ghost" id="mExport">Save backup file</button>
     <button class="btn ghost" id="mImport">Load backup file</button>
     <input type="file" id="mFile" accept="application/json,.json" class="hidden"/>
+
+    <label class="fl">Make it smarter</label>
+    <button class="btn primary" id="mGaps">Fill the gaps${(()=>{const g=gapGroups();const t=g.reach.length+g.cadence.length;return t?" · "+t+" to fix":"";})()}</button>
+
+    <label class="fl">View</label>
+    <div class="chips">
+      <div class="chip vtog ${state.geo?'on':''}" data-v="geo" style="${state.geo?'background:rgba(255,255,255,0.16);color:#fff':''}">🌍 World map</div>
+      <div class="chip vtog ${state.hulls?'on':''}" data-v="hulls" style="${state.hulls?'background:rgba(255,255,255,0.16);color:#fff':''}">Clusters</div>
+      <div class="chip vtog ${state.decay?'on':''}" data-v="decay" style="${state.decay?'background:rgba(255,255,255,0.16);color:#fff':''}">Fade stale</div>
+      <div class="chip vtog ${state.colorMode==="cluster"?'on':''}" data-v="colorMode" style="${state.colorMode==="cluster"?'background:rgba(255,255,255,0.16);color:#fff':''}">Colour by group</div>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);line-height:1.5;margin-top:8px">
+      World map anchors ${geoCount()} of your places to their real location. Colour by group gives each branch its own hue (category shows as a small dot).
+    </div>
 
     <label class="fl">Power-ups</label>
     <button class="btn ghost" id="mList">List / reconnect view</button>
@@ -1319,6 +1565,18 @@ function openMenu(){
   { const x=document.getElementById("mSyncNow"); if(x) x.onclick=async()=>{ toast("Syncing…"); await syncNow(false,true); }; }
   { const x=document.getElementById("mPull"); if(x) x.onclick=async()=>{ toast("Refreshing…"); let c=gistCfg(); if(c&&!c.id){ const f=await gistFind(); if(f){ c.id=f; setGistCfg(c); } } const r=await gistPull(); if(r.ok&&r.data){ const a=mergeCloudNodes(normNodes(r.data)); if(a){ save(); kick(0.8); refreshChrome(); } toast(a?("Pulled · "+a+" new"):"Up to date"); } else toast("Pull failed: "+(r.err||"")); }; }
   { const x=document.getElementById("mDisc"); if(x) x.onclick=()=>{ setGistCfg(null); toast("Cloud disconnected"); openMenu(); }; }
+  document.getElementById("mGaps").onclick=()=>openGaps("reach");
+  sheet.querySelectorAll(".vtog").forEach(c=>c.onclick=()=>{
+    const v=c.dataset.v;
+    if(v==="colorMode") state.colorMode = state.colorMode==="cluster" ? "category" : "cluster";
+    else state[v]=!state[v];
+    const on = v==="colorMode" ? state.colorMode==="cluster" : !!state[v];
+    c.classList.toggle("on",on);
+    c.style.background=on?"rgba(255,255,255,0.16)":""; c.style.color=on?"#fff":"";
+    save(); rebuild(); kick(v==="geo"?1:0.3); requestFrame();
+    if(v==="geo"){ closeSheet(); setTimeout(fitAll,700); toast(state.geo?"World map on":"Free-form layout"); }
+    haptic();
+  });
   sheet.querySelectorAll(".filt").forEach(c=>c.onclick=()=>{
     const k=c.dataset.key;
     if(state.filters[k]){ delete state.filters[k]; } else { state.filters[k]=true; }
@@ -1532,6 +1790,62 @@ function renderList(){
   const rows=arr.map(listRow).join("") || `<div style="text-align:center;color:var(--txt2);padding:50px 10px">No people yet.<br/>Tap + to add someone, or import your phone contacts from the menu.</div>`;
   body.innerHTML=summary+rows;
   body.querySelectorAll(".rem-item").forEach(it=>it.onclick=(e)=>{ if(e.target.closest("a")) return; const n=byId(it.dataset.id); if(n) openDetail(n); });
+}
+
+/* ============================================================
+   INTELLIGENCE: suggested cadence + data-gap queue
+============================================================ */
+// closeness drives how often you'd naturally want to be in touch
+function suggestedCadence(p){
+  const c=clamp(p.closeness||5,1,10);
+  if(c>=9) return 30;
+  if(c>=7) return 60;
+  if(c>=5) return 90;
+  if(c>=3) return 180;
+  return 0;                       // acquaintances: no nagging
+}
+function cadenceCandidates(){
+  return state.nodes.filter(p=>p.type==="person" && !p.cadenceDays && suggestedCadence(p)>0);
+}
+function applySuggestedCadence(){
+  const list=cadenceCandidates(); let n=0;
+  list.forEach(p=>{ p.cadenceDays=suggestedCadence(p); if(!p.lastContact) p.lastContact=Date.now(); n++; });
+  if(n){ rebuild(); save(); kick(0.4); refreshChrome(); if(listOpen) renderList(); }
+  return n;
+}
+function gapGroups(){
+  const ppl=state.nodes.filter(p=>p.type==="person");
+  return {
+    reach:  ppl.filter(p=>{ const s=p.socials||{}; return !Object.keys(s).some(k=>s[k]); }),
+    bday:   ppl.filter(p=>!p.birthday),
+    photo:  ppl.filter(p=>!p.photo),
+    cadence:cadenceCandidates(),
+  };
+}
+function openGaps(kind){
+  const g=gapGroups();
+  const k=kind||"reach";
+  const titles={reach:"No way to reach them",bday:"Missing birthday",photo:"No photo",cadence:"No check-in rhythm"};
+  const list=g[k]||[];
+  const tab=(id,label,count)=>`<div class="chip gtab ${k===id?'on':''}" data-k="${id}" style="${k===id?'background:rgba(255,255,255,0.16);color:#fff':''}">${label} ${count}</div>`;
+  const rows=list.slice(0,80).map(p=>`<div class="rem-item" data-id="${p.id}">
+      <div class="dot" style="background:${hexA(nodeColor(p),0.22)};color:${nodeColor(p)}">${p.emoji||initials(p.name)}</div>
+      <div style="flex:1;min-width:0"><div class="nm">${esc(p.name)}</div><div class="ds">${esc(cityOf(p)||pathString(p))}</div></div>
+      <div class="go">&#8250;</div></div>`).join("") ||
+    `<div style="text-align:center;color:var(--txt2);padding:34px">Nothing missing here. 🎉</div>`;
+  openSheet(`<div class="sh-title">Fill the gaps</div>
+    <div class="sh-sub">The fastest way to make Orbit smarter</div>
+    <div class="chips" style="margin-top:12px">
+      ${tab("reach","Unreachable",g.reach.length)}${tab("bday","No birthday",g.bday.length)}
+      ${tab("photo","No photo",g.photo.length)}${tab("cadence","No rhythm",g.cadence.length)}
+    </div>
+    ${k==="cadence" && g.cadence.length ? `<button class="btn primary" id="gApply">Set a smart rhythm for all ${g.cadence.length}</button>
+      <div style="font-size:11px;color:var(--txt3);line-height:1.5;margin-top:6px">Based on closeness: 9–10 → 30 days · 7–8 → 60 · 5–6 → 90 · 3–4 → 180 · below that, none.</div>`:""}
+    <div style="margin-top:10px">${rows}</div>`);
+  sheet.querySelectorAll(".gtab").forEach(t=>t.onclick=()=>openGaps(t.dataset.k));
+  sheet.querySelectorAll(".rem-item").forEach(it=>it.onclick=()=>{ const p=byId(it.dataset.id); if(p) openPersonForm(p,p.parentId); });
+  const ga=document.getElementById("gApply");
+  if(ga) ga.onclick=()=>{ const n=applySuggestedCadence(); toast(n?("Set rhythms for "+n+" people"):"Nothing to set"); openGaps("cadence"); };
 }
 
 /* ============================================================
